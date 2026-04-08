@@ -9,13 +9,16 @@ namespace OfficeCli.Core;
 
 public class ResidentServer : IDisposable
 {
-    private readonly IDocumentHandler _handler;
+    private IDocumentHandler _handler = null!;
     private readonly string _filePath;
     private readonly string _pipeName;
+    private readonly bool _editable;
     private CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _commandLock = new(1, 1);
     private readonly TimeSpan _idleTimeout = TimeSpan.FromMinutes(12);
     private CancellationTokenSource _idleCts = new();
+    private string _startupError = "";
+    private int _startupState = (int)ResidentStartupState.Starting;
     private bool _disposed;
 
     public string PipeName => _pipeName;
@@ -24,7 +27,7 @@ public class ResidentServer : IDisposable
     {
         _filePath = Path.GetFullPath(filePath);
         _pipeName = GetPipeName(_filePath);
-        _handler = DocumentHandlerFactory.Open(_filePath, editable);
+        _editable = editable;
     }
 
     public static string GetPipeName(string filePath)
@@ -47,33 +50,65 @@ public class ResidentServer : IDisposable
         // Start idle watchdog
         var idleTask = RunIdleWatchdogAsync(token);
 
-        // Main command loop - accept connections concurrently, serialize command execution
-        while (!token.IsCancellationRequested)
+        try
         {
-            var server = new NamedPipeServerStream(_pipeName, PipeDirection.InOut,
-                NamedPipeServerStream.MaxAllowedServerInstances,
-                PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
-            try
+            await OpenHandlerAsync(token);
+            if (!token.IsCancellationRequested)
             {
-                await server.WaitForConnectionAsync(token);
-                // Handle client asynchronously so we can accept the next connection
-                _ = HandleClientWithLockAsync(server, token);
-            }
-            catch (OperationCanceledException)
-            {
-                await server.DisposeAsync();
-                break;
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"Resident error: {ex.Message}");
-                await server.DisposeAsync();
+                // Main command loop - accept connections concurrently, serialize command execution
+                while (!token.IsCancellationRequested)
+                {
+                    var server = new NamedPipeServerStream(_pipeName, PipeDirection.InOut,
+                        NamedPipeServerStream.MaxAllowedServerInstances,
+                        PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+                    try
+                    {
+                        await server.WaitForConnectionAsync(token);
+                        // Handle client asynchronously so we can accept the next connection
+                        _ = HandleClientWithLockAsync(server, token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        await server.DisposeAsync();
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"Resident error: {ex.Message}");
+                        await server.DisposeAsync();
+                    }
+                }
             }
         }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _startupError = ex.Message;
+            SetStartupState(ResidentStartupState.Failed);
+            _cts.Cancel();
+            throw;
+        }
+        finally
+        {
+            // Both tasks observe the same token; swallow cancellation on shutdown
+            try { await pingTask; } catch (OperationCanceledException) { }
+            try { await idleTask; } catch (OperationCanceledException) { }
+        }
+    }
 
-        // Both tasks observe the same token; swallow cancellation on shutdown
-        try { await pingTask; } catch (OperationCanceledException) { }
-        try { await idleTask; } catch (OperationCanceledException) { }
+    private async Task OpenHandlerAsync(CancellationToken token)
+    {
+        var handler = await Task.Run(() => DocumentHandlerFactory.Open(_filePath, _editable), token);
+        if (token.IsCancellationRequested)
+        {
+            handler.Dispose();
+            return;
+        }
+
+        _handler = handler;
+        SetStartupState(ResidentStartupState.Ready);
     }
 
     private void ResetIdleTimer()
@@ -151,12 +186,12 @@ public class ResidentServer : IDisposable
                             var request = System.Text.Json.JsonSerializer.Deserialize<ResidentRequest>(requestLine, ResidentJsonContext.Default.ResidentRequest);
                             if (request?.Command == "__ping__")
                             {
-                                var response = MakeResponse(0, _filePath, "");
+                                var response = MakeResponse(0, _filePath, GetPingError(), GetPingStateToken());
                                 await WriteLineToPipeAsync(accepted, response, token);
                             }
                             else if (request?.Command == "__close__")
                             {
-                                var response = MakeResponse(0, "Closing resident.", "");
+                                var response = MakeResponse(0, "Closing resident.", "", GetPingStateToken());
                                 await WriteLineToPipeAsync(accepted, response, token);
                                 _cts.Cancel();
                                 // Kick the main pipe listener out of WaitForConnectionAsync
@@ -723,10 +758,35 @@ public class ResidentServer : IDisposable
         }
     }
 
-    private static string MakeResponse(int exitCode, string stdout, string stderr)
+    private static string MakeResponse(int exitCode, string stdout, string stderr, string state = "")
     {
-        var response = new ResidentResponse { ExitCode = exitCode, Stdout = stdout, Stderr = stderr };
+        var response = new ResidentResponse { ExitCode = exitCode, Stdout = stdout, Stderr = stderr, State = state };
         return System.Text.Json.JsonSerializer.Serialize(response, ResidentJsonContext.Default.ResidentResponse);
+    }
+
+    private string GetPingStateToken()
+    {
+        return GetStartupState() switch
+        {
+            ResidentStartupState.Ready => "ready",
+            ResidentStartupState.Failed => "failed",
+            _ => "starting"
+        };
+    }
+
+    private string GetPingError()
+    {
+        return GetStartupState() == ResidentStartupState.Failed ? _startupError : "";
+    }
+
+    private ResidentStartupState GetStartupState()
+    {
+        return (ResidentStartupState)Volatile.Read(ref _startupState);
+    }
+
+    private void SetStartupState(ResidentStartupState state)
+    {
+        Volatile.Write(ref _startupState, (int)state);
     }
 
     // ==================== Pipe I/O helpers ====================
@@ -795,8 +855,11 @@ public class ResidentServer : IDisposable
                 _commandLock.Wait();
                 _commandLock.Release();
 
-                try { _handler.Dispose(); }
-                catch (Exception ex) { Console.Error.WriteLine($"Warning: handler dispose error: {ex.Message}"); }
+                if (GetStartupState() == ResidentStartupState.Ready)
+                {
+                    try { _handler.Dispose(); }
+                    catch (Exception ex) { Console.Error.WriteLine($"Warning: handler dispose error: {ex.Message}"); }
+                }
 
                 _commandLock.Dispose();
             });
@@ -866,6 +929,15 @@ public class ResidentResponse
     public int ExitCode { get; set; }
     public string Stdout { get; set; } = "";
     public string Stderr { get; set; } = "";
+    public string State { get; set; } = "";
+}
+
+[System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter))]
+internal enum ResidentStartupState
+{
+    Starting,
+    Ready,
+    Failed
 }
 
 [System.Text.Json.Serialization.JsonSourceGenerationOptions]

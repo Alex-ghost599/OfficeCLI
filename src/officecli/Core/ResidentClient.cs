@@ -6,41 +6,70 @@ using System.Text;
 
 namespace OfficeCli.Core;
 
+public enum ResidentProbeState
+{
+    NotRunning,
+    Starting,
+    Ready,
+    Failed
+}
+
+public class ResidentProbeResult
+{
+    public string PipeName { get; set; } = "";
+    public ResidentProbeState State { get; set; }
+    public string Error { get; set; } = "";
+}
+
 public static class ResidentClient
 {
+    public static ResidentProbeResult Probe(string filePath)
+    {
+        var pipeName = ResidentServer.GetPipeName(filePath);
+        try
+        {
+            using var client = new NamedPipeClientStream(".", pipeName + "-ping", PipeDirection.InOut);
+            client.Connect(100);
+
+            var pingRequest = new ResidentRequest { Command = "__ping__" };
+            var json = System.Text.Json.JsonSerializer.Serialize(pingRequest, ResidentJsonContext.Default.ResidentRequest);
+            PipeWriteLine(client, json);
+
+            var responseLine = PipeReadLine(client);
+            if (responseLine == null)
+                return new ResidentProbeResult { PipeName = pipeName, State = ResidentProbeState.NotRunning };
+
+            var response = System.Text.Json.JsonSerializer.Deserialize<ResidentResponse>(responseLine, ResidentJsonContext.Default.ResidentResponse);
+            if (response == null || string.IsNullOrEmpty(response.Stdout))
+                return new ResidentProbeResult { PipeName = pipeName, State = ResidentProbeState.NotRunning };
+
+            var residentFilePath = Path.GetFullPath(response.Stdout);
+            var requestedFilePath = Path.GetFullPath(filePath);
+            if (!string.Equals(residentFilePath, requestedFilePath, StringComparison.OrdinalIgnoreCase))
+                return new ResidentProbeResult { PipeName = pipeName, State = ResidentProbeState.NotRunning };
+
+            return new ResidentProbeResult
+            {
+                PipeName = pipeName,
+                State = ParseProbeState(response.State),
+                Error = response.Stderr
+            };
+        }
+        catch
+        {
+            return new ResidentProbeResult { PipeName = pipeName, State = ResidentProbeState.NotRunning };
+        }
+    }
+
     /// <summary>
     /// Check if a resident is running for this file (without consuming a connection).
     /// Just tries to connect briefly.
     /// </summary>
     public static bool TryConnect(string filePath, out string pipeName)
     {
-        pipeName = ResidentServer.GetPipeName(filePath);
-        try
-        {
-            using var client = new NamedPipeClientStream(".", pipeName + "-ping", PipeDirection.InOut);
-            client.Connect(100); // 100ms timeout
-
-            // Ping to verify it's the right file
-            var pingRequest = new ResidentRequest { Command = "__ping__" };
-            var json = System.Text.Json.JsonSerializer.Serialize(pingRequest, ResidentJsonContext.Default.ResidentRequest);
-            PipeWriteLine(client, json);
-
-            var responseLine = PipeReadLine(client);
-            if (responseLine == null) return false;
-
-            var response = System.Text.Json.JsonSerializer.Deserialize<ResidentResponse>(responseLine, ResidentJsonContext.Default.ResidentResponse);
-            if (response == null) return false;
-
-            // Stdout contains the file path when responding to ping
-            if (string.IsNullOrEmpty(response.Stdout)) return false;
-            var residentFilePath = Path.GetFullPath(response.Stdout);
-            var requestedFilePath = Path.GetFullPath(filePath);
-            return string.Equals(residentFilePath, requestedFilePath, StringComparison.OrdinalIgnoreCase);
-        }
-        catch
-        {
-            return false;
-        }
+        var probe = Probe(filePath);
+        pipeName = probe.PipeName;
+        return probe.State == ResidentProbeState.Ready;
     }
 
     /// <summary>
@@ -78,29 +107,50 @@ public static class ResidentClient
     /// <summary>
     /// Send a close command to the resident server.
     /// </summary>
-    public static bool SendClose(string filePath)
+    public static bool SendClose(string filePath, int maxRetries = 2)
     {
         // Send close via the dedicated ping pipe (always responsive)
         var pipeName = ResidentServer.GetPipeName(filePath) + "-ping";
-        try
+        for (int attempt = 0; attempt <= maxRetries; attempt++)
         {
-            using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
-            client.Connect(200);
+            try
+            {
+                using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
+                client.Connect(1000);
 
-            var request = new ResidentRequest { Command = "__close__" };
-            var json = System.Text.Json.JsonSerializer.Serialize(request, ResidentJsonContext.Default.ResidentRequest);
-            PipeWriteLine(client, json);
+                var request = new ResidentRequest { Command = "__close__" };
+                var json = System.Text.Json.JsonSerializer.Serialize(request, ResidentJsonContext.Default.ResidentRequest);
+                PipeWriteLine(client, json);
 
-            var responseLine = PipeReadLine(client);
-            if (responseLine == null) return false;
+                var responseLine = PipeReadLine(client);
+                if (responseLine == null)
+                    continue;
 
-            var response = System.Text.Json.JsonSerializer.Deserialize<ResidentResponse>(responseLine, ResidentJsonContext.Default.ResidentResponse);
-            return response != null && response.ExitCode == 0;
+                var response = System.Text.Json.JsonSerializer.Deserialize<ResidentResponse>(responseLine, ResidentJsonContext.Default.ResidentResponse);
+                if (response != null && response.ExitCode == 0)
+                    return true;
+            }
+            catch
+            {
+                if (attempt == maxRetries)
+                    return false;
+            }
+
+            Thread.Sleep(50 * (attempt + 1));
         }
-        catch
+
+        return false;
+    }
+
+    private static ResidentProbeState ParseProbeState(string? state)
+    {
+        return state?.ToLowerInvariant() switch
         {
-            return false;
-        }
+            "starting" => ResidentProbeState.Starting,
+            "failed" => ResidentProbeState.Failed,
+            "ready" or "" or null => ResidentProbeState.Ready,
+            _ => ResidentProbeState.Ready
+        };
     }
 
     // ==================== Pipe I/O helpers ====================
