@@ -1,0 +1,6 @@
+/.tmp-guides/
+/.tmp-tools/
+/.tools/
+**/bin/
+**/obj/
+**/TestResults/
