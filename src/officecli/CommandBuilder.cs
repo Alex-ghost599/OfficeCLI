@@ -11,6 +11,7 @@ namespace OfficeCli;
 static partial class CommandBuilder
 {
     private static readonly TimeSpan ResidentStartupTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan ResidentShutdownTimeout = TimeSpan.FromSeconds(15);
 
     public static RootCommand BuildRootCommand()
     {
@@ -110,6 +111,9 @@ static partial class CommandBuilder
 
             if (ResidentClient.SendClose(file.FullName))
             {
+                if (!WaitForResidentStop(file.FullName, ResidentShutdownTimeout))
+                    throw new InvalidOperationException($"Resident close signal was sent for {file.Name}, but the process did not stop within {ResidentShutdownTimeout.TotalSeconds:0} seconds.");
+
                 var msg = $"Resident closed for {file.Name}";
                 if (json) Console.WriteLine(OutputFormatter.WrapEnvelopeText(msg));
                 else Console.WriteLine(msg);
@@ -232,6 +236,21 @@ static partial class CommandBuilder
         }
 
         return lastProbe;
+    }
+
+    private static bool WaitForResidentStop(string filePath, TimeSpan timeout)
+    {
+        var stopwatch = Stopwatch.StartNew();
+
+        while (stopwatch.Elapsed < timeout)
+        {
+            if (ResidentClient.Probe(filePath).State == ResidentProbeState.NotRunning)
+                return true;
+
+            Thread.Sleep(100);
+        }
+
+        return ResidentClient.Probe(filePath).State == ResidentProbeState.NotRunning;
     }
 
 
