@@ -10,6 +10,9 @@ namespace OfficeCli;
 
 static partial class CommandBuilder
 {
+    private static readonly TimeSpan ResidentStartupTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan ResidentShutdownTimeout = TimeSpan.FromSeconds(15);
+
     public static RootCommand BuildRootCommand()
     {
         var jsonOption = new Option<bool>("--json") { Description = "Output as JSON (AI-friendly)" };
@@ -37,13 +40,24 @@ static partial class CommandBuilder
             var file = result.GetValue(openFileArg)!;
             var filePath = file.FullName;
 
-            // If already running, reuse the existing resident
-            if (ResidentClient.TryConnect(filePath, out _))
+            var existingProbe = ResidentClient.Probe(filePath);
+
+            // If already running or warming up, reuse the existing resident
+            if (existingProbe.State != ResidentProbeState.NotRunning)
             {
-                var msg = $"Opened {file.Name} (already running, do NOT call close)";
-                if (json) Console.WriteLine(OutputFormatter.WrapEnvelopeText(msg));
-                else Console.WriteLine(msg);
-                return 0;
+                var readyProbe = WaitForResidentReady(filePath, null, ResidentStartupTimeout);
+                if (readyProbe.State == ResidentProbeState.Ready)
+                {
+                    var msg = $"Opened {file.Name} (already running, do NOT call close)";
+                    if (json) Console.WriteLine(OutputFormatter.WrapEnvelopeText(msg));
+                    else Console.WriteLine(msg);
+                    return 0;
+                }
+
+                if (readyProbe.State == ResidentProbeState.Failed)
+                    throw new InvalidOperationException($"Resident failed during startup. {readyProbe.Error}".Trim());
+
+                throw new InvalidOperationException($"Resident for {file.Name} is already starting but did not become ready within {ResidentStartupTimeout.TotalSeconds:0} seconds.");
             }
 
             // Fork a background process running the resident server
@@ -65,25 +79,19 @@ static partial class CommandBuilder
             if (process == null)
                 throw new InvalidOperationException("Failed to start resident process.");
 
-            // Wait briefly for the server to start accepting connections
-            for (int i = 0; i < 50; i++) // up to 5 seconds
+            var startedProbe = WaitForResidentReady(filePath, process, ResidentStartupTimeout);
+            if (startedProbe.State == ResidentProbeState.Ready)
             {
-                Thread.Sleep(100);
-                if (ResidentClient.TryConnect(filePath, out _))
-                {
-                    var msg = $"Opened {file.Name} (remember to call close when done)";
-                    if (json) Console.WriteLine(OutputFormatter.WrapEnvelopeText(msg));
-                    else Console.WriteLine(msg);
-                    return 0;
-                }
-                if (process.HasExited)
-                {
-                    var stderr = process.StandardError.ReadToEnd();
-                    throw new InvalidOperationException($"Resident process exited. {stderr}");
-                }
+                var msg = $"Opened {file.Name} (remember to call close when done)";
+                if (json) Console.WriteLine(OutputFormatter.WrapEnvelopeText(msg));
+                else Console.WriteLine(msg);
+                return 0;
             }
 
-            throw new InvalidOperationException("Resident process started but not responding.");
+            if (startedProbe.State == ResidentProbeState.Failed)
+                throw new InvalidOperationException($"Resident process exited. {startedProbe.Error}".Trim());
+
+            throw new InvalidOperationException($"Resident process started but did not become ready within {ResidentStartupTimeout.TotalSeconds:0} seconds.");
         }, json); });
 
         rootCommand.Add(openCommand);
@@ -97,15 +105,22 @@ static partial class CommandBuilder
         closeCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
         {
             var file = result.GetValue(closeFileArg)!;
+            var probe = ResidentClient.Probe(file.FullName);
+            if (probe.State == ResidentProbeState.NotRunning)
+                throw new InvalidOperationException($"No resident running for {file.Name}");
+
             if (ResidentClient.SendClose(file.FullName))
             {
+                if (!WaitForResidentStop(file.FullName, ResidentShutdownTimeout))
+                    throw new InvalidOperationException($"Resident close signal was sent for {file.Name}, but the process did not stop within {ResidentShutdownTimeout.TotalSeconds:0} seconds.");
+
                 var msg = $"Resident closed for {file.Name}";
                 if (json) Console.WriteLine(OutputFormatter.WrapEnvelopeText(msg));
                 else Console.WriteLine(msg);
             }
             else
             {
-                throw new InvalidOperationException($"No resident running for {file.Name}");
+                throw new InvalidOperationException($"Failed to close resident for {file.Name}");
             }
             return 0;
         }, json); });
@@ -182,6 +197,60 @@ static partial class CommandBuilder
         }
 
         return response.ExitCode;
+    }
+
+    private static ResidentProbeResult WaitForResidentReady(string filePath, Process? process, TimeSpan timeout)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var lastProbe = ResidentClient.Probe(filePath);
+
+        while (stopwatch.Elapsed < timeout)
+        {
+            if (lastProbe.State is ResidentProbeState.Ready or ResidentProbeState.Failed)
+                return lastProbe;
+
+            if (process != null && process.HasExited)
+            {
+                var stderr = process.StandardError.ReadToEnd().Trim();
+                return new ResidentProbeResult
+                {
+                    PipeName = lastProbe.PipeName,
+                    State = ResidentProbeState.Failed,
+                    Error = string.IsNullOrEmpty(stderr) ? "Resident process exited during startup." : stderr
+                };
+            }
+
+            Thread.Sleep(100);
+            lastProbe = ResidentClient.Probe(filePath);
+        }
+
+        if (process != null && process.HasExited)
+        {
+            var stderr = process.StandardError.ReadToEnd().Trim();
+            return new ResidentProbeResult
+            {
+                PipeName = lastProbe.PipeName,
+                State = ResidentProbeState.Failed,
+                Error = string.IsNullOrEmpty(stderr) ? "Resident process exited during startup." : stderr
+            };
+        }
+
+        return lastProbe;
+    }
+
+    private static bool WaitForResidentStop(string filePath, TimeSpan timeout)
+    {
+        var stopwatch = Stopwatch.StartNew();
+
+        while (stopwatch.Elapsed < timeout)
+        {
+            if (ResidentClient.Probe(filePath).State == ResidentProbeState.NotRunning)
+                return true;
+
+            Thread.Sleep(100);
+        }
+
+        return ResidentClient.Probe(filePath).State == ResidentProbeState.NotRunning;
     }
 
 
