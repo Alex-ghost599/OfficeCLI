@@ -93,7 +93,7 @@ public class WordFunctionalTests : IDisposable
         node.Format.Should().ContainKey("listStyle");
         node.Format.Should().ContainKey("numFmt");
         node.Format.Should().ContainKey("start");
-        ((int)node.Format["numlevel"]).Should().Be(0);
+        ((string)node.Format["numlevel"]).Should().Be("0");
         ((string)node.Format["listStyle"]).Should().Be("bullet");
         ((string)node.Format["numFmt"]).Should().Be("bullet");
         ((int)node.Format["start"]).Should().Be(1);
@@ -103,14 +103,14 @@ public class WordFunctionalTests : IDisposable
 
         // 4. Get + Verify level changed
         node = _handler.Get("/body/p[1]");
-        ((int)node.Format["numlevel"]).Should().Be(1);
+        ((string)node.Format["numlevel"]).Should().Be("1");
 
         // 5. Persist + Verify
         var handler2 = Reopen();
         node = handler2.Get("/body/p[1]");
         node.Text.Should().Be("Bullet item 1");
         ((string)node.Format["listStyle"]).Should().Be("bullet");
-        ((int)node.Format["numlevel"]).Should().Be(1);
+        ((string)node.Format["numlevel"]).Should().Be("1");
     }
 
     [Fact]
@@ -181,7 +181,7 @@ public class WordFunctionalTests : IDisposable
             ["text"] = "Item A",
             ["liststyle"] = "bullet"
         });
-        var numId1 = (int)_handler.Get("/body/p[1]").Format["numid"];
+        var numId1 = (string)_handler.Get("/body/p[1]").Format["numid"];
 
         // 2. Add second consecutive bullet paragraph — should reuse same numId
         _handler.Add("/body", "paragraph", null, new Dictionary<string, string>
@@ -189,7 +189,7 @@ public class WordFunctionalTests : IDisposable
             ["text"] = "Item B",
             ["liststyle"] = "bullet"
         });
-        var numId2 = (int)_handler.Get("/body/p[2]").Format["numid"];
+        var numId2 = (string)_handler.Get("/body/p[2]").Format["numid"];
 
         numId2.Should().Be(numId1, "consecutive same-type list items should share numId");
 
@@ -197,7 +197,7 @@ public class WordFunctionalTests : IDisposable
         var handler2 = Reopen();
         var n1 = handler2.Get("/body/p[1]");
         var n2 = handler2.Get("/body/p[2]");
-        ((int)n1.Format["numid"]).Should().Be((int)n2.Format["numid"]);
+        ((string)n1.Format["numid"]).Should().Be((string)n2.Format["numid"]);
     }
 
     [Fact]
@@ -241,26 +241,26 @@ public class WordFunctionalTests : IDisposable
         });
 
         // 2. Get the numid back
-        var numId = (int)_handler.Get("/body/p[1]").Format["numid"];
-        numId.Should().BeGreaterThan(0);
+        var numId = (string)_handler.Get("/body/p[1]").Format["numid"];
+        int.Parse(numId).Should().BeGreaterThan(0);
 
         // 3. Add another paragraph using the raw numid
         _handler.Add("/body", "paragraph", null, new Dictionary<string, string>
         {
             ["text"] = "Same list",
-            ["numid"] = numId.ToString(),
+            ["numid"] = numId,
             ["numlevel"] = "0"
         });
 
         // 4. Get + Verify shared numid
         var node2 = _handler.Get("/body/p[2]");
-        ((int)node2.Format["numid"]).Should().Be(numId);
-        ((int)node2.Format["numlevel"]).Should().Be(0);
+        ((string)node2.Format["numid"]).Should().Be(numId);
+        ((string)node2.Format["numlevel"]).Should().Be("0");
 
         // 5. Persist + Verify
         var handler2 = Reopen();
         node2 = handler2.Get("/body/p[2]");
-        ((int)node2.Format["numid"]).Should().Be(numId);
+        ((string)node2.Format["numid"]).Should().Be(numId);
     }
 
     [Fact]
@@ -278,13 +278,13 @@ public class WordFunctionalTests : IDisposable
 
         // 3. Get + Verify level 8 works
         var node = _handler.Get("/body/p[1]");
-        ((int)node.Format["numlevel"]).Should().Be(8);
+        ((string)node.Format["numlevel"]).Should().Be("8");
         ((string)node.Format["listStyle"]).Should().Be("bullet");
 
         // 4. Persist + Verify
         var handler2 = Reopen();
         node = handler2.Get("/body/p[1]");
-        ((int)node.Format["numlevel"]).Should().Be(8);
+        ((string)node.Format["numlevel"]).Should().Be("8");
     }
 
     [Fact]
@@ -345,7 +345,7 @@ public class WordFunctionalTests : IDisposable
         ordered[0].Text.Should().Be("Ordered item");
 
         // 3. Query by numid
-        var numId = (int)_handler.Get("/body/p[2]").Format["numid"];
+        var numId = (string)_handler.Get("/body/p[2]").Format["numid"];
         var byNumId = _handler.Query($"paragraph[numid={numId}]");
         byNumId.Should().ContainSingle(n => n.Text == "Bullet item");
     }
@@ -1060,13 +1060,13 @@ public class WordFunctionalTests : IDisposable
         // 4. Get + Verify
         sec = _handler.Get("/section[1]");
         ((string)sec.Format["type"]).Should().Be("continuous");
-        ((int)sec.Format["margintop"]).Should().Be(720);
+        ((string)sec.Format["margintop"]).Should().Be("1.27cm");
 
         // 5. Persistence
         Reopen();
         sec = _handler.Get("/section[1]");
         ((string)sec.Format["type"]).Should().Be("continuous");
-        ((int)sec.Format["margintop"]).Should().Be(720);
+        ((string)sec.Format["margintop"]).Should().Be("1.27cm");
     }
 
     // ==================== Footnote Lifecycle ====================
@@ -1378,20 +1378,20 @@ public class WordFunctionalTests : IDisposable
         // Get + Verify after Add
         var node = _handler.Get("/body/p[1]/r[1]");
         node.Format.Should().ContainKey("w14shadow");
-        ((string)node.Format["w14shadow"]).Should().Be("#000000");
+        ((string)node.Format["w14shadow"]).Should().Be("#000000;4;315;3;50");
 
         // Set (modify to different shadow)
         _handler.Set("/body/p[1]/r[1]", new() { ["w14shadow"] = "FF0000;6;45;5;60" });
 
         // Get + Verify after Set
         node = _handler.Get("/body/p[1]/r[1]");
-        ((string)node.Format["w14shadow"]).Should().Be("#FF0000");
+        ((string)node.Format["w14shadow"]).Should().Be("#FF0000;6;45;5;60");
 
         // Persistence
         Reopen();
         node = _handler.Get("/body/p[1]/r[1]");
         node.Format.Should().ContainKey("w14shadow");
-        ((string)node.Format["w14shadow"]).Should().Be("#FF0000");
+        ((string)node.Format["w14shadow"]).Should().Be("#FF0000;6;45;5;60");
     }
 
     [Fact]

@@ -687,8 +687,9 @@ public class BugHuntPart53 : IDisposable
         handler.Set(node.Path, new() { ["widowcontrol"] = "false" });
 
         node = handler.Get("/body/p[1]");
-        node.Format.Should().NotContainKey("widowcontrol",
-            "after Set widowcontrol=false, the property should be removed");
+        node.Format.Should().ContainKey("widowcontrol");
+        node.Format["widowcontrol"].Should().Be(false,
+            "after Set widowcontrol=false, Get should preserve the explicit disabled state");
     }
 
     // ────────────────────────────────────────────────────────────────────────

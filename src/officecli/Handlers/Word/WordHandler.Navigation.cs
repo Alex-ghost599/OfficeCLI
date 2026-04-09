@@ -102,6 +102,7 @@ public partial class WordHandler
                 if (margins.Left?.Value != null) node.Format["marginLeft"] = FormatTwipsToCm(margins.Left.Value);
                 if (margins.Right?.Value != null) node.Format["marginRight"] = FormatTwipsToCm(margins.Right.Value);
             }
+            AddWordSectionLegacyAliases(node);
         }
 
         // Document protection
@@ -566,6 +567,8 @@ public partial class WordHandler
                             node.Format["start"] = start.Value;
                     }
                 }
+
+                AddWordParagraphLegacyAliases(node);
             }
 
             // First-run formatting on the paragraph node (like PPTX does for shapes).
@@ -1124,6 +1127,7 @@ public partial class WordHandler
                 if (shd?.Fill?.Value != null)
                 {
                     node.Format["fill"] = ParseHelpers.FormatHexColor(shd.Fill.Value);
+                    node.Format["shd"] = node.Format["fill"];
                 }
             }
             // Width
