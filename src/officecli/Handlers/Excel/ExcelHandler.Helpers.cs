@@ -75,6 +75,14 @@ public partial class ExcelHandler
     private static Worksheet GetSheet(WorksheetPart part) =>
         part.Worksheet ?? throw new InvalidOperationException("Corrupt file: worksheet data missing");
 
+    private static void AddExcelFontReadbackAliases(DocumentNode node)
+    {
+        if (node.Format.ContainsKey("bold") && !node.Format.ContainsKey("font.bold"))
+            node.Format["font.bold"] = true;
+        if (node.Format.ContainsKey("italic") && !node.Format.ContainsKey("font.italic"))
+            node.Format["font.italic"] = true;
+    }
+
     /// <summary>
     /// Insert a ConditionalFormatting element after all existing CF elements (preserving add order).
     /// Falls back to after sheetData if no CF exists yet.
@@ -536,6 +544,7 @@ public partial class ExcelHandler
                             if (font.FontSize?.Val?.Value != null)
                                 node.Format["font.size"] = $"{font.FontSize.Val.Value:0.##}pt";
                             if (font.FontName?.Val?.Value != null) node.Format["font.name"] = font.FontName.Val.Value;
+                            AddExcelFontReadbackAliases(node);
                         }
                     }
 

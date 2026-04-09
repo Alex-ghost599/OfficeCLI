@@ -451,13 +451,11 @@ public class BugHuntPart54 : IDisposable
     }
 
     // ────────────────────────────────────────────────────────────────────────
-    // Bug5415: Excel cell font readback uses "font.bold", "font.italic" etc.
-    // but the cell also gets a "bold" key separately (for backward compat?).
-    // However there is no separate "italic" key — only "font.italic".
-    // This is an inconsistency: bold has two keys, italic has only one.
+    // Bug5415: Excel cell font readback should expose both friendly keys
+    // and legacy font.* aliases for style compatibility.
     // ────────────────────────────────────────────────────────────────────────
     [Fact]
-    public void Bug5415_ExcelCellBoldHasTwoKeysButItalicHasOne()
+    public void Bug5415_ExcelCellFontReadbackExposesFriendlyAndLegacyKeys()
     {
         var path = CreateTempFile("xlsx");
         BlankDocCreator.Create(path);
@@ -475,21 +473,15 @@ public class BugHuntPart54 : IDisposable
 
         var node = handler.Get("/Sheet1/A1");
 
-        // Check if both "bold" and "font.bold" exist
-        var hasBold = node.Format.ContainsKey("bold");
-        var hasFontBold = node.Format.ContainsKey("font.bold");
-        var hasItalic = node.Format.ContainsKey("italic");
-        var hasFontItalic = node.Format.ContainsKey("font.italic");
+        node.Format.Should().ContainKey("bold");
+        node.Format.Should().ContainKey("font.bold");
+        node.Format.Should().ContainKey("italic");
+        node.Format.Should().ContainKey("font.italic");
 
-        if (hasBold && hasFontBold)
-        {
-            // Bold has two keys: "bold" and "font.bold"
-            // Italic should also have two keys for consistency
-            hasItalic.Should().BeTrue(
-                "Bold has both 'bold' and 'font.bold' keys, " +
-                "but italic only has 'font.italic' without a matching 'italic' key. " +
-                "This is inconsistent");
-        }
+        node.Format["bold"].Should().Be(true);
+        node.Format["font.bold"].Should().Be(true);
+        node.Format["italic"].Should().Be(true);
+        node.Format["font.italic"].Should().Be(true);
     }
 
     // ────────────────────────────────────────────────────────────────────────
