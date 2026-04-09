@@ -84,9 +84,9 @@ public class BugHuntPart22 : IDisposable
         // Remove the sheet
         _excelHandler.Remove("/Data");
 
-        // The named range should be removed when the sheet it references is deleted
-        var act = () => _excelHandler.Get("/namedrange[MyRange]");
-        act.Should().Throw<ArgumentException>(
+        // Missing named ranges follow the Excel Get contract and return null.
+        var node = _excelHandler.Get("/namedrange[MyRange]");
+        node.Should().BeNull(
             "named range referencing a deleted sheet should be automatically cleaned up");
     }
 
