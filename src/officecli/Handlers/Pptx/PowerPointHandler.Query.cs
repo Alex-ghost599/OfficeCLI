@@ -25,7 +25,7 @@ public partial class PowerPointHandler
         {
             var node = new DocumentNode { Path = "/", Type = "presentation" };
 
-            // Slide size
+            // Slide size (CLI-friendly readback, not raw OOXML enum names)
             var sldSz = _doc.PresentationPart?.Presentation?.GetFirstChild<SlideSize>();
             if (sldSz != null)
             {

@@ -84,7 +84,9 @@ public class PptxFunctionalTests : IDisposable
         _handler.Add("/", "slide", null, new Dictionary<string, string>());
         var shapePath = _handler.Add("/slide[1]", "shape", null,
             new Dictionary<string, string> { ["text"] = "Test" });
-        shapePath.Should().Be("/slide[1]/shape[1]");
+        shapePath.Should().MatchRegex(@"^/slide\[1\]/shape\[@id=\d+\]$");
+        var node = _handler.Get(shapePath);
+        node.Text.Should().Be("Test");
     }
 
     [Fact]
@@ -250,7 +252,8 @@ public class PptxFunctionalTests : IDisposable
         _handler.Add("/", "slide", null, new Dictionary<string, string>());
         var path = _handler.Add("/slide[1]", "table", null,
             new Dictionary<string, string> { ["rows"] = "2", ["cols"] = "3" });
-        path.Should().Be("/slide[1]/table[1]");
+        path.Should().MatchRegex(@"^/slide\[1\]/table\[@id=\d+\]$");
+        _handler.Get(path).Type.Should().Be("table");
     }
 
     [Fact]
@@ -1574,10 +1577,10 @@ public class PptxFunctionalTests : IDisposable
             ["series1"] = "Revenue:100,200,300",
             ["series2"] = "Cost:80,150,250"
         });
-        path.Should().Be("/slide[1]/chart[1]");
+        path.Should().MatchRegex(@"^/slide\[1\]/chart\[@id=\d+\]$");
 
         // 2. Get + Verify
-        var node = _handler.Get("/slide[1]/chart[1]");
+        var node = _handler.Get(path);
         node.Type.Should().Be("chart");
         node.Format.Should().ContainKey("chartType");
         ((string)node.Format["chartType"]).Should().Be("column");
@@ -1586,15 +1589,15 @@ public class PptxFunctionalTests : IDisposable
         ((string)node.Format["categories"]).Should().Be("Jan,Feb,Mar");
 
         // 3. Set — change title
-        _handler.Set("/slide[1]/chart[1]", new() { ["title"] = "Updated Sales" });
+        _handler.Set(path, new() { ["title"] = "Updated Sales" });
 
         // 4. Get + Verify title changed
-        node = _handler.Get("/slide[1]/chart[1]");
+        node = _handler.Get(path);
         ((string)node.Format["title"]).Should().Be("Updated Sales");
 
         // 5. Persist + Verify
         Reopen();
-        node = _handler.Get("/slide[1]/chart[1]");
+        node = _handler.Get(path);
         ((string)node.Format["chartType"]).Should().Be("column");
         ((string)node.Format["title"]).Should().Be("Updated Sales");
         ((int)node.Format["seriesCount"]).Should().Be(2);
@@ -1720,7 +1723,7 @@ public class PptxFunctionalTests : IDisposable
 
         var node = _handler.Get("/slide[1]/chart[1]");
         node.Format.Should().ContainKey("legend");
-        ((string)node.Format["legend"]).Should().Be("t");
+        ((string)node.Format["legend"]).Should().Be("top");
 
         // Change legend to none
         _handler.Set("/slide[1]/chart[1]", new() { ["legend"] = "none" });
@@ -1730,11 +1733,11 @@ public class PptxFunctionalTests : IDisposable
         // Set legend back
         _handler.Set("/slide[1]/chart[1]", new() { ["legend"] = "right" });
         node = _handler.Get("/slide[1]/chart[1]");
-        ((string)node.Format["legend"]).Should().Be("r");
+        ((string)node.Format["legend"]).Should().Be("right");
 
         Reopen();
         node = _handler.Get("/slide[1]/chart[1]");
-        ((string)node.Format["legend"]).Should().Be("r");
+        ((string)node.Format["legend"]).Should().Be("right");
     }
 
     [Fact]
@@ -1974,17 +1977,17 @@ public class PptxFunctionalTests : IDisposable
 
         // 2. Get + Verify
         var root = _handler.Get("/");
-        ((string)root.Format["slideSize"]).Should().Be("screen4x3");
+        ((string)root.Format["slideSize"]).Should().Be("standard");
 
         // 3. Set to 16:9
         _handler.Set("/", new() { ["slidesize"] = "16:9" });
         root = _handler.Get("/");
-        ((string)root.Format["slideSize"]).Should().Be("screen16x9");
+        ((string)root.Format["slideSize"]).Should().Be("widescreen");
 
         // 4. Persist + Verify
         Reopen();
         root = _handler.Get("/");
-        ((string)root.Format["slideSize"]).Should().Be("screen16x9");
+        ((string)root.Format["slideSize"]).Should().Be("widescreen");
     }
 
     [Fact]

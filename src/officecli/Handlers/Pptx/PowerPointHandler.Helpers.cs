@@ -246,8 +246,9 @@ public partial class PowerPointHandler
     }
 
     /// <summary>
-    /// Build a path segment using @id= if the element has a cNvPr.Id, otherwise use positional index.
-    /// E.g. "shape[@id=5]" or "shape[2]".
+    /// Build the canonical PPT path segment for a top-level element.
+    /// Prefer @id= when the element has a cNvPr.Id because that output stays stable across edits;
+    /// positional [N] remains accepted for input compatibility.
     /// </summary>
     internal static string BuildElementPathSegment(string elementType, OpenXmlElement element, int positionalIndex)
     {
@@ -1039,6 +1040,27 @@ public partial class PowerPointHandler
     {
         if (x > maxX) maxX = x;
         if (y > maxY) maxY = y;
+    }
+
+    /// <summary>
+    /// Distinguish preset names (rect, roundRect, rightArrow) from SVG-like custom paths.
+    /// The CLI treats command-style values such as "M 0,0 L 100,0 ... Z" as custom geometry.
+    /// </summary>
+    private static bool LooksLikeCustomGeometryPath(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        var trimmed = value.Trim();
+        if (trimmed.Contains(','))
+            return true;
+
+        var firstToken = trimmed
+            .Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault()?
+            .ToUpperInvariant();
+
+        return firstToken is "M" or "L" or "C" or "Q" or "A" or "Z" or "H" or "V" or "S" or "T";
     }
 
     /// <summary>
