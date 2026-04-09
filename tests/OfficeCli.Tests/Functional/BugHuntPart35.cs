@@ -206,15 +206,15 @@ public class BugHuntPart35 : IDisposable
 
         handler.Add("/", "slide", null, new());
 
-        // Set unknown slidesize — should report as unsupported
+        // Set a supported slide size alias and verify friendly readback.
         var unsupported = handler.Set("/", new()
         {
             ["slidesize"] = "letter"
         });
 
-        // "letter" is not a recognized slide size value
-        unsupported.Should().Contain("slidesize",
-            "Unknown slidesize values should be reported as unsupported");
+        unsupported.Should().BeEmpty();
+        var presentation = handler.Get("/");
+        presentation.Format["slideSize"].Should().Be("letter");
     }
 
     // =====================================================================
