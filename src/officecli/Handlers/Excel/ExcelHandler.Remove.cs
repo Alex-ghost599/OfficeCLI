@@ -79,7 +79,7 @@ public partial class ExcelHandler
             if (definedNames != null)
             {
                 var toRemove = definedNames.Elements<DefinedName>()
-                    .Where(dn => dn.Text?.Contains(sheetName + "!", StringComparison.OrdinalIgnoreCase) == true)
+                    .Where(dn => DefinedNameReferencesSheet(dn.Text, sheetName))
                     .ToList();
                 foreach (var dn in toRemove) dn.Remove();
                 if (!definedNames.HasChildren) definedNames.Remove();
@@ -970,6 +970,20 @@ public partial class ExcelHandler
             dn.Text = ShiftColLettersInText(dn.Text, sheetName, deletedColIdx);
         }
         GetWorkbook().Save();
+    }
+
+    private static bool DefinedNameReferencesSheet(string? formulaText, string sheetName)
+    {
+        if (string.IsNullOrWhiteSpace(formulaText)) return false;
+
+        foreach (Match match in Regex.Matches(formulaText, @"(?:'((?:[^']|'')+)'|([^'!,]+))!"))
+        {
+            var rawSheet = match.Groups[1].Success ? match.Groups[1].Value.Replace("''", "'") : match.Groups[2].Value;
+            if (rawSheet.Equals(sheetName, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
     }
 
     // ==================== Formula impact detection ====================
