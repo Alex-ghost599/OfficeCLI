@@ -381,7 +381,6 @@ public partial class PowerPointHandler
             var custGeom = shape.ShapeProperties?.GetFirstChild<Drawing.CustomGeometry>();
             if (custGeom != null)
             {
-                node.Format["preset"] = "custom";
                 // Reconstruct SVG-like path string from the custom geometry path list
                 var pathData = ReconstructCustomGeometryPath(custGeom);
                 node.Format["geometry"] = !string.IsNullOrEmpty(pathData) ? pathData : "custom";

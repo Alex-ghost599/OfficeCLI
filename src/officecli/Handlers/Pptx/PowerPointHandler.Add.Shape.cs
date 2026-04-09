@@ -230,6 +230,8 @@ public partial class PowerPointHandler
                     }
                 }
 
+                string? customGeometryValue = null;
+
                 // Position and size (in EMU, 1cm = 360000 EMU; or parse as cm/in)
                 {
                     long xEmu = 0, yEmu = 0;
@@ -260,11 +262,15 @@ public partial class PowerPointHandler
                     }
                     newShape.ShapeProperties!.Transform2D = xfrm;
 
-                    var presetName = properties.TryGetValue("preset", out var pn) ? pn
+                    var requestedGeometry = properties.TryGetValue("preset", out var pn) ? pn
                         : properties.TryGetValue("geometry", out pn) ? pn
                         : properties.GetValueOrDefault("shape", "rect");
+                    customGeometryValue = LooksLikeCustomGeometryPath(requestedGeometry)
+                        ? requestedGeometry
+                        : null;
+                    var initialPresetName = customGeometryValue != null ? "rect" : requestedGeometry;
                     newShape.ShapeProperties.AppendChild(
-                        new Drawing.PresetGeometry(new Drawing.AdjustValueList()) { Preset = ParsePresetShape(presetName) }
+                        new Drawing.PresetGeometry(new Drawing.AdjustValueList()) { Preset = ParsePresetShape(initialPresetName) }
                     );
                 }
 
@@ -363,6 +369,8 @@ public partial class PowerPointHandler
                 var effectProps = properties
                     .Where(kv => effectKeys.Contains(kv.Key))
                     .ToDictionary(kv => kv.Key, kv => kv.Value);
+                if (customGeometryValue != null)
+                    effectProps["geometry"] = customGeometryValue;
                 if (effectProps.Count > 0)
                     SetRunOrShapeProperties(effectProps, GetAllRuns(newShape), newShape, slidePart);
 
