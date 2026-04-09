@@ -54,7 +54,7 @@ public class WordNewFeaturesTests : IDisposable
 
         var sec = _handler.Get("/section[1]");
         sec.Format["columns"].Should().Be((short)2);
-        sec.Format["columnSpace"].Should().Be("480");
+        sec.Format["columnSpace"].Should().Be("0.85cm");
     }
 
     [Fact]

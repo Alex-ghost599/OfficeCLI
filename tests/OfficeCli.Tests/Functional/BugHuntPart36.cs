@@ -782,10 +782,8 @@ public class BugHuntPart36 : IDisposable
     }
 
     // =====================================================================
-    // Bug3626: Word section Set orientation without swapping width/height
-    // When changing orientation from portrait to landscape, the page size
-    // width and height should be swapped. But the code only sets the Orient
-    // attribute without performing the swap (line 376-378).
+    // Bug3626: Word section landscape readback should use friendly lengths
+    // while preserving width > height semantics.
     // =====================================================================
     [Fact]
     public void Bug3626_Word_Section_Orientation_NoSwap()
@@ -797,9 +795,9 @@ public class BugHuntPart36 : IDisposable
         // Get initial dimensions (portrait: width < height)
         var secBefore = handler.Get("/section[1]");
         var widthBefore = secBefore.Format.ContainsKey("pageWidth")
-            ? Convert.ToInt32(secBefore.Format["pageWidth"]) : 12240;
+            ? WordSectionLengthAssertions.ParseCm(secBefore.Format["pageWidth"]) : 0m;
         var heightBefore = secBefore.Format.ContainsKey("pageHeight")
-            ? Convert.ToInt32(secBefore.Format["pageHeight"]) : 15840;
+            ? WordSectionLengthAssertions.ParseCm(secBefore.Format["pageHeight"]) : 0m;
 
         // Set to landscape
         handler.Set("/section[1]", new()
@@ -808,15 +806,14 @@ public class BugHuntPart36 : IDisposable
         });
 
         var secAfter = handler.Get("/section[1]");
+        secAfter.Format["orientation"].Should().Be("landscape");
         var widthAfter = secAfter.Format.ContainsKey("pageWidth")
-            ? Convert.ToInt32(secAfter.Format["pageWidth"]) : widthBefore;
+            ? WordSectionLengthAssertions.ParseCm(secAfter.Format["pageWidth"]) : widthBefore;
         var heightAfter = secAfter.Format.ContainsKey("pageHeight")
-            ? Convert.ToInt32(secAfter.Format["pageHeight"]) : heightBefore;
+            ? WordSectionLengthAssertions.ParseCm(secAfter.Format["pageHeight"]) : heightBefore;
 
-        // For landscape, width should be > height
         widthAfter.Should().BeGreaterThan(heightAfter,
-            "Landscape orientation should swap width and height so width > height. " +
-            "The code only sets Orient attribute without swapping dimensions.");
+            "landscape readback should keep width greater than height after friendly formatting.");
     }
 
     // =====================================================================

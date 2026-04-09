@@ -604,12 +604,8 @@ public class BugHuntPart44 : IDisposable
     }
 
     // =====================================================================
-    // Bug4424: Word section Set uses "pagewidth" (lowercase) key
-    // but the format dictionary also stores "pagewidth" (lowercase).
-    // This is fine internally, but the page size is stored as uint,
-    // not string. If user sets pageWidth="15840", the value stored
-    // in format is 15840u (uint), not the string "15840".
-    // So round-tripping through Set then Get loses the string type.
+    // Bug4424: Word section page size readback now returns a friendly string,
+    // not the raw twips string that was originally set.
     // =====================================================================
     [Fact]
     public void Bug4424_Word_Section_PageSize_Type_Is_Uint_Not_String()
@@ -622,15 +618,11 @@ public class BugHuntPart44 : IDisposable
 
         var node = handler.Get("/section[1]");
         node.Format.Should().ContainKey("pageWidth");
-        // The value is stored as uint, so comparing to string "12240" would fail
         var pwValue = node.Format["pageWidth"];
-        pwValue.ToString().Should().Be("12240",
-            because: "pageWidth should round-trip correctly");
-        // BUG: The value is uint (12240u), not string ("12240").
-        // This means node.Format["pageWidth"].Should().Be("12240") would fail
-        // because uint 12240 != string "12240".
+        pwValue.ToString().Should().Be("21.59cm",
+            because: "pageWidth readback is formatted as a friendly unit string");
         pwValue.Should().BeOfType<string>(
-            because: "format values should be strings for consistency with other properties");
+            because: "section layout readback values should be strings for consistency with other friendly length properties");
     }
 
     // =====================================================================

@@ -395,10 +395,8 @@ public class BugHuntPart43 : IDisposable
     }
 
     // =====================================================================
-    // Bug4315: Word section Set orientation swap logic
-    // When setting orientation to "landscape" on a section that already has
-    // landscape dimensions (w>h), the handler should NOT swap dimensions.
-    // But if dimensions are portrait (w<h), it should swap.
+    // Bug4315: Word section orientation readback should remain friendly and
+    // report width > height once the existing landscape swap logic applies.
     // =====================================================================
     [Fact]
     public void Bug4315_Word_Section_Orientation_Swap()
@@ -414,14 +412,12 @@ public class BugHuntPart43 : IDisposable
         node.Format.Should().ContainKey("orientation");
         node.Format["orientation"].ToString().Should().Be("landscape");
 
-        // Page dimensions should be swapped: width > height
-        if (node.Format.ContainsKey("pageWidth") && node.Format.ContainsKey("pageHeight"))
-        {
-            var w = Convert.ToInt32(node.Format["pageWidth"]);
-            var h = Convert.ToInt32(node.Format["pageHeight"]);
-            w.Should().BeGreaterThan(h,
-                because: "landscape orientation should have width > height");
-        }
+        node.Format.Should().ContainKey("pageWidth");
+        node.Format.Should().ContainKey("pageHeight");
+        var w = WordSectionLengthAssertions.ParseCm(node.Format["pageWidth"]);
+        var h = WordSectionLengthAssertions.ParseCm(node.Format["pageHeight"]);
+        w.Should().BeGreaterThan(h,
+            because: "landscape orientation should read back with width greater than height");
     }
 
     // =====================================================================
