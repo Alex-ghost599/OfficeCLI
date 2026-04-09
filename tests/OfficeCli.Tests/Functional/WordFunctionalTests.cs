@@ -1060,13 +1060,13 @@ public class WordFunctionalTests : IDisposable
         // 4. Get + Verify
         sec = _handler.Get("/section[1]");
         ((string)sec.Format["type"]).Should().Be("continuous");
-        ((int)sec.Format["margintop"]).Should().Be(720);
+        ((string)sec.Format["margintop"]).Should().Be("1.27cm");
 
         // 5. Persistence
         Reopen();
         sec = _handler.Get("/section[1]");
         ((string)sec.Format["type"]).Should().Be("continuous");
-        ((int)sec.Format["margintop"]).Should().Be(720);
+        ((string)sec.Format["margintop"]).Should().Be("1.27cm");
     }
 
     // ==================== Footnote Lifecycle ====================
@@ -1378,14 +1378,14 @@ public class WordFunctionalTests : IDisposable
         // Get + Verify after Add
         var node = _handler.Get("/body/p[1]/r[1]");
         node.Format.Should().ContainKey("w14shadow");
-        ((string)node.Format["w14shadow"]).Should().Be("#000000");
+        ((string)node.Format["w14shadow"]).Should().Be("#000000;4;315;3;50");
 
         // Set (modify to different shadow)
         _handler.Set("/body/p[1]/r[1]", new() { ["w14shadow"] = "FF0000;6;45;5;60" });
 
         // Get + Verify after Set
         node = _handler.Get("/body/p[1]/r[1]");
-        ((string)node.Format["w14shadow"]).Should().Be("#FF0000");
+        ((string)node.Format["w14shadow"]).Should().Be("#FF0000;6;45;5;60");
 
         // Persistence
         Reopen();
