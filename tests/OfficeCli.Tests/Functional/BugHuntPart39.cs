@@ -186,8 +186,9 @@ public class BugHuntPart39 : IDisposable
         var tableNode = handler.Get("/slide[1]/table[1]", depth: 2);
         var cellNode = tableNode.Children[0].Children[0]; // tr[1]/tc[1]
         cellNode.Text.Should().Be("Centered");
-        cellNode.Format.Should().ContainKey("alignment",
-            because: "table cell NodeBuilder should report paragraph alignment but doesn't");
+        cellNode.Format.Should().ContainKey("align");
+        cellNode.Format["align"].Should().Be("center",
+            because: "table cell NodeBuilder reports paragraph alignment through the canonical align key");
     }
 
     // =====================================================================
