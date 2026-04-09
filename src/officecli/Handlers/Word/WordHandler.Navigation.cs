@@ -662,6 +662,7 @@ public partial class WordHandler
             {
                 node.Format["shading"] = ParseHelpers.FormatHexColor(run.RunProperties.Shading.Fill.Value);
             }
+            AddWordRunLegacyAliases(node);
             // w14 text effects
             ReadW14TextEffects(run.RunProperties, node);
             // Image properties if run contains a Drawing
@@ -1178,6 +1179,8 @@ public partial class WordHandler
             if (rPr.Strike != null) node.Format["strike"] = true;
             if (rPr.Highlight?.Val != null) node.Format["highlight"] = rPr.Highlight.Val.InnerText;
         }
+
+        AddWordTableCellLegacyAliases(node);
     }
 
     private static void ReadBorder(BorderType? border, string key, DocumentNode node)

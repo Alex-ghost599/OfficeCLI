@@ -127,6 +127,18 @@ public partial class WordHandler
         AddFormatAlias(node, "marginRight", "marginright");
     }
 
+    private static void AddWordRunLegacyAliases(DocumentNode node)
+    {
+        AddFormatAlias(node, "shading", "shd");
+    }
+
+    private static void AddWordTableCellLegacyAliases(DocumentNode node)
+    {
+        AddFormatAlias(node, "gridSpan", "gridspan");
+        AddFormatAlias(node, "fill", "shd");
+        AddFormatAlias(node, "shd", "fill");
+    }
+
     /// <summary>
     /// Get footnote/endnote text, skipping the reference mark run and its trailing space.
     /// </summary>
