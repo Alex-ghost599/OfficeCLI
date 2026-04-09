@@ -544,6 +544,7 @@ public partial class ExcelHandler
                             if (font.FontSize?.Val?.Value != null)
                                 node.Format["font.size"] = $"{font.FontSize.Val.Value:0.##}pt";
                             if (font.FontName?.Val?.Value != null) node.Format["font.name"] = font.FontName.Val.Value;
+                            AddExcelFontReadbackAliases(node);
                         }
                     }
 
