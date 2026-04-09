@@ -43,6 +43,18 @@ public sealed class WatchSessionTests : IDisposable
     }
 
     [Fact]
+    public void Watch_CompanionCommands_ReturnEmptyState_WhenNoWatchRunning()
+    {
+        var filePath = CreateTempDocx();
+
+        WatchServer.GetExistingWatchPort(filePath).Should().BeNull();
+        WatchNotifier.QuerySelection(filePath).Should().BeNull();
+        WatchNotifier.QueryMarksFull(filePath).Should().BeNull();
+        WatchNotifier.RemoveMarks(filePath, new UnmarkRequest { All = true }).Should().BeNull();
+        WatchNotifier.SendClose(filePath).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Watch_CompanionCommands_CanDiscoverSelectionMarksAndCloseLifecycle()
     {
         var filePath = CreateTempDocx();
