@@ -213,7 +213,7 @@ Standard paths:
   /footnote[N]             Footnote N (N = id from add, returns text)
   /endnote[N]              Endnote N (N = id from add, returns text)
   /toc[N]                  TOC N (returns levels, hyperlinks, pageNumbers)
-  /section[N]              Section N (returns type, pageWidth/Height, orientation, margins)
+  /section[N]              Section N (returns type, pageWidth/Height, orientation, margins; lengths read back as friendly unit strings)
   /styles/StyleId          Style (returns font, size, bold, color, alignment, ...)
 
 Also supports any XML path via element localName:
@@ -351,8 +351,10 @@ TOC (/toc[N]):
 
 Section (/section[N]):
   type (nextPage|continuous|evenPage|oddPage),
-  pagewidth, pageheight (twips), orientation (portrait|landscape),
-  margintop, marginbottom, marginleft, marginright (twips),
+  pagewidth, pageheight, margintop, marginbottom, marginleft, marginright
+    Get/Query return friendly unit strings (e.g. "21cm", "29.7cm", "2.54cm")
+    Set/Add still accept twips or explicit units
+  orientation (portrait|landscape),
   columns (equal-width: "3" or "3,720" for count,space),
   colWidths (custom: "3000,720,2000,720,3000" alternating width,space),
   separator (bool, draw line between columns)
@@ -524,7 +526,8 @@ Types and properties:
 
   section (sectionbreak)  -- parent: /body
     type (nextPage|continuous|evenPage|oddPage, default: nextPage),
-    pagewidth, pageheight (twips), orientation (portrait|landscape)
+    pagewidth, pageheight (twips or explicit units on input; Get/Query read back as friendly unit strings),
+    orientation (portrait|landscape)
 
   footnote  -- parent: /body/p[N]
     text (required)
