@@ -1391,7 +1391,7 @@ public class WordFunctionalTests : IDisposable
         Reopen();
         node = _handler.Get("/body/p[1]/r[1]");
         node.Format.Should().ContainKey("w14shadow");
-        ((string)node.Format["w14shadow"]).Should().Be("#FF0000");
+        ((string)node.Format["w14shadow"]).Should().Be("#FF0000;6;45;5;60");
     }
 
     [Fact]
