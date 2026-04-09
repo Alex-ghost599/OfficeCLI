@@ -459,7 +459,7 @@ public class BugHuntPart28 : IDisposable
         _wordHandler.Add("/body", "paragraph", null, new() { ["text"] = "Second" });
         _wordHandler.Add("/body", "paragraph", null, new() { ["text"] = "Third" });
 
-        _wordHandler.Move("/body/p[3]", "/body", 0);
+        _wordHandler.Move("/body/p[3]", "/body", InsertPosition.AtIndex(0));
         _wordHandler.Get("/body/p[1]").Text.Should().Be("Third",
             "after move to position 0 (0-based), Third should be at p[1]");
     }

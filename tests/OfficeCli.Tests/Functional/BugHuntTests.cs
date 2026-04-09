@@ -198,7 +198,7 @@ public partial class BugHuntTests : IDisposable
         handler.Add("/", "slide", null, new() { ["title"] = "Slide3" });
 
         // Insert a new slide at index 0 (before first slide)
-        var resultPath = handler.Add("/", "slide", 0, new() { ["title"] = "Inserted" });
+        var resultPath = handler.Add("/", "slide", InsertPosition.AtIndex(0), new() { ["title"] = "Inserted" });
 
         // BUG: resultPath will be /slide[4] (total count), not /slide[1] (insertion position)
         // The slide was inserted at position 1, but the path says position 4

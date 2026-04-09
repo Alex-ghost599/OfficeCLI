@@ -1125,7 +1125,7 @@ public class PptxEnhancementTests : IDisposable
         handler.Get("/slide[2]").Children.Should().Contain(c => c.Text == "Slide B");
 
         // 4. Clone slide 2 at index 0 (insert at beginning)
-        var clonedPath = handler.CopyFrom("/slide[2]", "/", 0);
+        var clonedPath = handler.CopyFrom("/slide[2]", "/", InsertPosition.AtIndex(0));
         clonedPath.Should().Be("/slide[1]");
 
         // 5. Verify: cloned B is now slide[1], original A is slide[2], original B is slide[3]

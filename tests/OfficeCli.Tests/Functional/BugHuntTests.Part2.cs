@@ -159,7 +159,7 @@ public partial class BugHuntTests
         _wordHandler.Add("/body", "p", null, new() { ["text"] = "Third" });
 
         // Move third paragraph to position 0 (0-based index)
-        var newPath = _wordHandler.Move("/body/p[3]", "/body", 0);
+        var newPath = _wordHandler.Move("/body/p[3]", "/body", InsertPosition.AtIndex(0));
 
         // The returned path should be valid (1-based)
         newPath.Should().Contain("p[1]",
@@ -254,7 +254,7 @@ public partial class BugHuntTests
         _excelHandler.Add("/Sheet1", "cell", null, new() { ["ref"] = "A5", ["value"] = "50" });
 
         // Move row at index 5 to beginning
-        var newPath = _excelHandler.Move("/Sheet1/row[2]", "/Sheet1", 0);
+        var newPath = _excelHandler.Move("/Sheet1/row[2]", "/Sheet1", InsertPosition.AtIndex(0));
 
         // The returned path should reflect the logical position
         newPath.Should().Contain("row[",

@@ -3,6 +3,7 @@
 
 using FluentAssertions;
 using OfficeCli;
+using OfficeCli.Core;
 using OfficeCli.Handlers;
 using Xunit;
 
@@ -329,7 +330,7 @@ public class PptxFunctionalTests : IDisposable
         _handler.Set("/slide[1]/table[1]/tr[2]/tc[1]", new() { ["text"] = "Last" });
 
         // 2. Add row at index 1
-        var path = _handler.Add("/slide[1]/table[1]", "row", 1, new() { ["c1"] = "Middle" });
+        var path = _handler.Add("/slide[1]/table[1]", "row", InsertPosition.AtIndex(1), new() { ["c1"] = "Middle" });
         path.Should().Be("/slide[1]/table[1]/tr[2]");
 
         // 3. Get + Verify order
@@ -398,7 +399,7 @@ public class PptxFunctionalTests : IDisposable
         _handler.Set("/slide[1]/table[1]/tr[1]/tc[2]", new() { ["text"] = "C" });
 
         // 2. Add cell at index 1
-        var path = _handler.Add("/slide[1]/table[1]/tr[1]", "cell", 1, new() { ["text"] = "B" });
+        var path = _handler.Add("/slide[1]/table[1]/tr[1]", "cell", InsertPosition.AtIndex(1), new() { ["text"] = "B" });
         path.Should().Be("/slide[1]/table[1]/tr[1]/tc[2]");
 
         // 3. Get + Verify order

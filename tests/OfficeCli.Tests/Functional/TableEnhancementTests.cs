@@ -501,7 +501,7 @@ public class TableEnhancementTests : IDisposable
         _wordHandler.Add("/body", "table", null, new() { ["rows"] = "2", ["cols"] = "2" });
 
         // 2. Add header row at index 0 (becomes first row)
-        _wordHandler.Add("/body/tbl[1]", "row", 0,
+        _wordHandler.Add("/body/tbl[1]", "row", InsertPosition.AtIndex(0),
             new() { ["header"] = "true", ["c1"] = "Col A", ["c2"] = "Col B" });
 
         // 3. Get + Verify header row

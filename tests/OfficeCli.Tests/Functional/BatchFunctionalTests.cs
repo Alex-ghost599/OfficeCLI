@@ -76,7 +76,11 @@ public class BatchFunctionalTests : IDisposable
         {
             var props = item.Props ?? new();
             if (item.Command == "add")
-                handler.Add(item.Parent!, item.Type!, item.Index, props);
+                handler.Add(
+                    item.Parent!,
+                    item.Type!,
+                    item.Index.HasValue ? InsertPosition.AtIndex(item.Index.Value) : null,
+                    props);
             else if (item.Command == "set")
                 handler.Set(item.Path!, props);
         }
@@ -108,7 +112,11 @@ public class BatchFunctionalTests : IDisposable
         {
             var props = item.Props ?? new();
             if (item.Command == "add")
-                handler.Add(item.Parent!, item.Type!, item.Index, props);
+                handler.Add(
+                    item.Parent!,
+                    item.Type!,
+                    item.Index.HasValue ? InsertPosition.AtIndex(item.Index.Value) : null,
+                    props);
             else if (item.Command == "set")
                 handler.Set(item.Path!, props);
         }
@@ -155,8 +163,10 @@ public class BatchFunctionalTests : IDisposable
 
         req.Command.Should().Be("set");
         req.Args["path"].Should().Be("/slide[1]/shape[1]");
-        req.Props.Should().Contain("bold=true");
-        req.Props.Should().Contain("fill=FF0000");
+        req.Props.Should().ContainKey("bold");
+        req.Props!["bold"].Should().Be("true");
+        req.Props.Should().ContainKey("fill");
+        req.Props!["fill"].Should().Be("FF0000");
     }
 
     [Fact]
@@ -177,7 +187,8 @@ public class BatchFunctionalTests : IDisposable
         req.Args["parent"].Should().Be("/body");
         req.Args["type"].Should().Be("paragraph");
         req.Args["index"].Should().Be("2");
-        req.Props.Should().Contain("text=Hello");
+        req.Props.Should().ContainKey("text");
+        req.Props!["text"].Should().Be("Hello");
     }
 
     [Fact]
