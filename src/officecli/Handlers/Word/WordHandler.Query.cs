@@ -251,6 +251,7 @@ public partial class WordHandler
             if (margin?.Bottom?.Value != null) secNode.Format["marginBottom"] = FormatTwipsToCm((uint)Math.Abs(margin.Bottom.Value));
             if (margin?.Left?.Value != null) secNode.Format["marginLeft"] = FormatTwipsToCm(margin.Left.Value);
             if (margin?.Right?.Value != null) secNode.Format["marginRight"] = FormatTwipsToCm(margin.Right.Value);
+            AddWordSectionLegacyAliases(secNode);
 
             // Line numbers
             var lnNum = sectPr.GetFirstChild<LineNumberType>();
