@@ -577,6 +577,8 @@ Types and properties:
 
 --index is 0-based. If omitted, appends to end.
 --from clones an element (cross-part relationships handled automatically).
+Returned add paths prefer stable identifiers when available, e.g. /body/p[@paraId=...]/r[2]
+or /body/p[@paraId=...]/sdt[@sdtId=...], while positional paths remain valid input.
 
 Document properties (via set / path):
   title, author, subject, keywords, description, category,

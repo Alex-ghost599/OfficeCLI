@@ -158,7 +158,8 @@ public class WordNewFeaturesTests : IDisposable
         _handler.Add("/body", "paragraph", null, new() { ["text"] = "Before break" });
         var result = _handler.Add("/body/p[1]", "pagebreak", null, new());
 
-        result.Should().Contain("/body/p[1]/r[");
+        result.Should().StartWith("/body/p[@paraId=");
+        result.Should().Contain("/r[");
     }
 
     [Fact]
@@ -174,7 +175,8 @@ public class WordNewFeaturesTests : IDisposable
         _handler.Add("/body", "paragraph", null, new() { ["text"] = "Col1 text" });
         var result = _handler.Add("/body/p[1]", "columnbreak", null, new());
 
-        result.Should().Contain("/body/p[1]/r[");
+        result.Should().StartWith("/body/p[@paraId=");
+        result.Should().Contain("/r[");
     }
 
     [Fact]
@@ -183,7 +185,8 @@ public class WordNewFeaturesTests : IDisposable
         _handler.Add("/body", "paragraph", null, new() { ["text"] = "Before" });
         var result = _handler.Add("/body/p[1]", "break", null, new() { ["type"] = "column" });
 
-        result.Should().Contain("/body/p[1]/r[");
+        result.Should().StartWith("/body/p[@paraId=");
+        result.Should().Contain("/r[");
     }
 
     [Fact]
@@ -288,7 +291,8 @@ public class WordNewFeaturesTests : IDisposable
             ["text"] = "John"
         });
 
-        result.Should().Contain("/body/p[1]/sdt[");
+        result.Should().StartWith("/body/p[@paraId=");
+        result.Should().Contain("/sdt[@sdtId=");
 
         var node = _handler.Get(result);
         node.Type.Should().Be("sdt");
