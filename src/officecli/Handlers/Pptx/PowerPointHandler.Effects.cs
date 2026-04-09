@@ -381,7 +381,7 @@ public partial class PowerPointHandler
 
     /// <summary>
     /// Get or create Outline in correct schema position.
-    /// Schema order: fill → ln → effectLst → scene3d → sp3d → extLst
+    /// Schema order: xfrm → geometry (prstGeom/custGeom) → fill → ln → effectLst → scene3d → sp3d → extLst
     /// </summary>
     private static Drawing.Outline EnsureOutline(ShapeProperties spPr)
     {
@@ -389,7 +389,18 @@ public partial class PowerPointHandler
         if (outline != null) return outline;
 
         outline = new Drawing.Outline();
-        // Insert before effectLst/scene3d/sp3d/extLst if they exist
+        // Prefer inserting after fill; otherwise after geometry/xfrm and before effect nodes.
+        DocumentFormat.OpenXml.OpenXmlElement? fillAnchor = spPr.GetFirstChild<Drawing.SolidFill>();
+        fillAnchor ??= spPr.GetFirstChild<Drawing.NoFill>();
+        fillAnchor ??= spPr.GetFirstChild<Drawing.GradientFill>();
+        fillAnchor ??= spPr.GetFirstChild<Drawing.PatternFill>();
+        fillAnchor ??= spPr.GetFirstChild<Drawing.BlipFill>();
+        if (fillAnchor != null)
+        {
+            spPr.InsertAfter(outline, fillAnchor);
+            return outline;
+        }
+
         var insertBefore = (DocumentFormat.OpenXml.OpenXmlElement?)spPr.GetFirstChild<Drawing.EffectList>()
             ?? (DocumentFormat.OpenXml.OpenXmlElement?)spPr.GetFirstChild<Drawing.Scene3DType>()
             ?? (DocumentFormat.OpenXml.OpenXmlElement?)spPr.GetFirstChild<Drawing.Shape3DType>()
@@ -397,7 +408,15 @@ public partial class PowerPointHandler
         if (insertBefore != null)
             spPr.InsertBefore(outline, insertBefore);
         else
-            spPr.AppendChild(outline);
+        {
+            DocumentFormat.OpenXml.OpenXmlElement? geometryAnchor = spPr.GetFirstChild<Drawing.CustomGeometry>();
+            geometryAnchor ??= spPr.GetFirstChild<Drawing.PresetGeometry>();
+            geometryAnchor ??= spPr.Transform2D;
+            if (geometryAnchor != null)
+                spPr.InsertAfter(outline, geometryAnchor);
+            else
+                spPr.AppendChild(outline);
+        }
         return outline;
     }
 

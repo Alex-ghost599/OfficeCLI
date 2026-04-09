@@ -13,18 +13,14 @@ public partial class PowerPointHandler
 {
     private static void InsertFillElement(ShapeProperties spPr, OpenXmlElement fillElement)
     {
-        // Schema order: xfrm → prstGeom → fill → ln → effectLst
-        var prstGeom = spPr.GetFirstChild<Drawing.PresetGeometry>();
-        if (prstGeom != null)
-            spPr.InsertAfter(fillElement, prstGeom);
+        // Schema order: xfrm → geometry (prstGeom/custGeom) → fill → ln → effectLst
+        DocumentFormat.OpenXml.OpenXmlElement? geometryAnchor = spPr.GetFirstChild<Drawing.CustomGeometry>();
+        geometryAnchor ??= spPr.GetFirstChild<Drawing.PresetGeometry>();
+        geometryAnchor ??= spPr.Transform2D;
+        if (geometryAnchor != null)
+            spPr.InsertAfter(fillElement, geometryAnchor);
         else
-        {
-            var xfrm = spPr.Transform2D;
-            if (xfrm != null)
-                spPr.InsertAfter(fillElement, xfrm);
-            else
-                spPr.PrependChild(fillElement);
-        }
+            spPr.PrependChild(fillElement);
     }
 
     // ==================== Color Helpers ====================

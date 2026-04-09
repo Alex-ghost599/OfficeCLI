@@ -1426,6 +1426,44 @@ public class PptxFunctionalTests : IDisposable
             "custGeom must come before ln in OOXML element order");
     }
 
+    [Fact]
+    public void CustomGeometry_Mutations_PreserveSchemaOrder()
+    {
+        _handler.Add("/", "slide", null, new());
+        _handler.Add("/slide[1]", "shape", null, new()
+        {
+            ["geometry"] = "M 0,0 L 100,0 L 100,100 L 0,100 Z"
+        });
+
+        _handler.Set("/slide[1]/shape[1]", new()
+        {
+            ["fill"] = "FF0000",
+            ["line"] = "0000FF",
+            ["rotation"] = "15"
+        });
+
+        var doc = _handler.GetType()
+            .GetField("_doc", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .GetValue(_handler) as DocumentFormat.OpenXml.Packaging.PresentationDocument;
+        var slidePart = doc!.PresentationPart!.SlideParts.First();
+        var shape = slidePart.Slide.Descendants<DocumentFormat.OpenXml.Presentation.Shape>().First();
+        var spPr = shape.ShapeProperties!;
+        var children = spPr.ChildElements.ToList();
+
+        var xfrmIdx = children.FindIndex(c => c is DocumentFormat.OpenXml.Drawing.Transform2D);
+        var custGeomIdx = children.FindIndex(c => c is DocumentFormat.OpenXml.Drawing.CustomGeometry);
+        var fillIdx = children.FindIndex(c => c is DocumentFormat.OpenXml.Drawing.SolidFill);
+        var lnIdx = children.FindIndex(c => c is DocumentFormat.OpenXml.Drawing.Outline);
+
+        xfrmIdx.Should().BeGreaterOrEqualTo(0);
+        custGeomIdx.Should().BeGreaterThan(xfrmIdx);
+        fillIdx.Should().BeGreaterThan(custGeomIdx);
+        lnIdx.Should().BeGreaterThan(custGeomIdx);
+
+        var errors = _handler.Validate();
+        errors.Should().BeEmpty("custom geometry followed by fill/line mutations should remain schema-valid");
+    }
+
     // ==================== Shape Image Fill ====================
 
     [Fact]
