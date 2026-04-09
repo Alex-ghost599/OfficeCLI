@@ -749,11 +749,9 @@ public class BugHuntPart40 : IDisposable
     }
 
     // =====================================================================
-    // Bug4029: PPTX connector lineWidth uses ParseEmu which gives EMU values
-    // but the connector Set handler (Set.cs:912) converts to int — lineWidth
-    // should use EmuConverter.ParseEmuAsInt for consistency.
-    // Let's verify the roundtrip: Set "2pt" lineWidth, Get should return "2pt"
-    // or "Npt" format (not EMU).
+    // Bug4029: PPTX connector lineWidth now follows the same normalized
+    // FormatLineWidth() readback contract as other PPTX line-bearing elements.
+    // Round-trip should return a user-facing length string, not raw EMU.
     // =====================================================================
     [Fact]
     public void Bug4029_Pptx_Connector_LineWidth_Roundtrip()
@@ -771,10 +769,6 @@ public class BugHuntPart40 : IDisposable
         handler.Set("/slide[1]/connector[1]", new() { ["lineWidth"] = "2pt" });
         var node = handler.Get("/slide[1]/connector[1]");
         node.Format.Should().ContainKey("lineWidth");
-        // ConnectorToNode reports lineWidth as "Npt" format (width / 12700.0)
-        // ParseEmu("2pt") = 2 * 12700 = 25400 EMU
-        // But Set handler uses (int)ParseEmu("2pt") = 25400
-        // Then Get reports 25400 / 12700.0 = "2pt" — should match
-        node.Format["lineWidth"].Should().Be("0.07cm");
+        node.Format["lineWidth"].Should().Be("2pt");
     }
 }

@@ -167,14 +167,14 @@ public class PptxEnhancementTests : IDisposable
         shape.ChildCount.Should().Be(2);
         var para2 = handler.Get("/slide[1]/shape[2]/paragraph[2]");
         para2.Text.Should().Be("Second");
-        para2.Format["align"].Should().Be("ctr");
+        para2.Format["align"].Should().Be("center");
 
         // 6. Set (modify the added paragraph)
         handler.Set("/slide[1]/shape[2]/paragraph[2]", new() { ["align"] = "right" });
 
         // 7. Get + Verify
         para2 = handler.Get("/slide[1]/shape[2]/paragraph[2]");
-        para2.Format["align"].Should().Be("r");
+        para2.Format["align"].Should().Be("right");
 
         // 8. Reopen + Verify
         Reopen(ref handler);
@@ -182,7 +182,7 @@ public class PptxEnhancementTests : IDisposable
         shape.ChildCount.Should().Be(2);
         para2 = handler.Get("/slide[1]/shape[2]/paragraph[2]");
         para2.Text.Should().Be("Second");
-        para2.Format["align"].Should().Be("r");
+        para2.Format["align"].Should().Be("right");
 
         handler.Dispose();
     }

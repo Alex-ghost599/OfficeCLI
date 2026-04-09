@@ -535,9 +535,8 @@ public class BugHuntPart41 : IDisposable
     // textwarp is in effectKeys so Add delegates to SetRunOrShapeProperties.
     // NodeBuilder reads textWarp from BodyProperties.
     // =====================================================================
-    // BUG: textWarp="wave" produces "textWave" which is not a valid
-    // TextShapeValues enum. The handler does not validate the warp name
-    // before passing it to the enum constructor, causing an exception.
+    // The handler now normalizes supported shorthands such as "wave"
+    // to concrete presets like "textWave1" before applying them.
     [Fact]
     public void Bug4119_Pptx_Shape_TextWarp_Roundtrip()
     {
@@ -547,15 +546,15 @@ public class BugHuntPart41 : IDisposable
 
         handler.Add("/", "slide", null, new());
 
-        // "wave" → "textWave" which is not a valid OOXML preset
-        // Valid would be "textWave1" or "textWave2"
-        var act = () => handler.Add("/slide[1]", "shape", null, new()
+        handler.Add("/slide[1]", "shape", null, new()
         {
             ["text"] = "Warped", ["textWarp"] = "wave"
         });
 
-        act.Should().Throw<ArgumentOutOfRangeException>(
-            because: "textWarp='wave' constructs invalid enum 'textWave' — handler should validate or map names");
+        var node = handler.Get("/slide[1]/shape[1]");
+        node.Format.Should().ContainKey("textWarp");
+        node.Format["textWarp"]?.ToString().Should().Be("textWave1",
+            because: "textWarp shorthand 'wave' is normalized to the valid preset 'textWave1'");
     }
 
     // =====================================================================
