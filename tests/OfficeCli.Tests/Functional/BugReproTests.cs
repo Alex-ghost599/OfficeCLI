@@ -132,10 +132,10 @@ public class BugReproTests : IDisposable
         });
 
         var sec = _wordHandler.Get("/section[1]");
-        var w = Convert.ToUInt32(sec.Format["pageWidth"]);
-        var h = Convert.ToUInt32(sec.Format["pageHeight"]);
+        sec.Format["orientation"].Should().Be("landscape");
+        var w = WordSectionLengthAssertions.ParseCm(sec.Format["pageWidth"]);
+        var h = WordSectionLengthAssertions.ParseCm(sec.Format["pageHeight"]);
 
-        // In landscape, width should be > height
         w.Should().BeGreaterThan(h, "Landscape page width should be greater than height");
     }
 

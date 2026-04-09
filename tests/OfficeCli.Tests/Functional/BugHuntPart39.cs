@@ -439,9 +439,8 @@ public class BugHuntPart39 : IDisposable
     }
 
     // =====================================================================
-    // Bug3915: Word section orientation Set only sets attribute without
-    // swapping Width/Height. When changing from portrait to landscape,
-    // the page width and height should swap.
+    // Bug3915: Word document root section layout readback should return
+    // friendly lengths after orientation changes.
     // =====================================================================
     [Fact]
     public void Bug3915_Word_Section_Orientation_No_Width_Height_Swap()
@@ -452,25 +451,30 @@ public class BugHuntPart39 : IDisposable
 
         // Get default page dimensions (portrait: width < height)
         var docBefore = handler.Get("/");
-        var widthBefore = docBefore.Format.ContainsKey("pageWidth") ? docBefore.Format["pageWidth"] : null;
-        var heightBefore = docBefore.Format.ContainsKey("pageHeight") ? docBefore.Format["pageHeight"] : null;
+        var widthBefore = docBefore.Format.ContainsKey("pageWidth")
+            ? WordSectionLengthAssertions.ParseCm(docBefore.Format["pageWidth"]) : (decimal?)null;
+        var heightBefore = docBefore.Format.ContainsKey("pageHeight")
+            ? WordSectionLengthAssertions.ParseCm(docBefore.Format["pageHeight"]) : (decimal?)null;
 
         // Set orientation to landscape
         handler.Set("/section[1]", new() { ["orientation"] = "landscape" });
 
         var docAfter = handler.Get("/");
-        var widthAfter = docAfter.Format.ContainsKey("pageWidth") ? docAfter.Format["pageWidth"] : null;
-        var heightAfter = docAfter.Format.ContainsKey("pageHeight") ? docAfter.Format["pageHeight"] : null;
+        docAfter.Format["orientation"].Should().Be("landscape");
+        var widthAfter = docAfter.Format.ContainsKey("pageWidth")
+            ? WordSectionLengthAssertions.ParseCm(docAfter.Format["pageWidth"]) : (decimal?)null;
+        var heightAfter = docAfter.Format.ContainsKey("pageHeight")
+            ? WordSectionLengthAssertions.ParseCm(docAfter.Format["pageHeight"]) : (decimal?)null;
 
         // After switching to landscape, width should be > height
         // (or at minimum, width and height should have swapped)
         if (widthBefore != null && heightBefore != null)
         {
-            // In portrait: width < height. After landscape: width should be > height
-            var wAfter = Convert.ToUInt32(widthAfter);
-            var hAfter = Convert.ToUInt32(heightAfter);
-            wAfter.Should().BeGreaterThan(hAfter,
-                because: "landscape orientation should have width > height, but Set only sets Orient attribute without swapping dimensions");
+            widthBefore!.Value.Should().BeLessThan(heightBefore!.Value);
+            widthAfter.Should().NotBeNull();
+            heightAfter.Should().NotBeNull();
+            widthAfter!.Value.Should().BeGreaterThan(heightAfter!.Value,
+                because: "document root readback should keep friendly width/height values aligned with landscape orientation");
         }
     }
 

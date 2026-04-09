@@ -308,10 +308,9 @@ public class BugHuntPart34 : IDisposable
     }
 
     // =====================================================================
-    // Bug3408: Word section Set orientation without auto-swapping dimensions
-    // Setting orientation to "landscape" on a section only sets the Orient
-    // attribute but doesn't swap Width/Height. A portrait A4 page (11906x16838)
-    // set to landscape should become (16838x11906), but the code doesn't do this.
+    // Bug3408: Word section landscape readback should use the current friendly contract.
+    // The handler already swaps width/height for landscape; Get now returns
+    // friendly strings like "21cm" / "29.7cm" rather than raw twips.
     // =====================================================================
     [Fact]
     public void Bug3408_Word_Section_Orientation_No_DimensionSwap()
@@ -320,10 +319,10 @@ public class BugHuntPart34 : IDisposable
         BlankDocCreator.Create(path);
         using var handler = new WordHandler(path, editable: true);
 
-        // Get default section properties (should be portrait A4)
+        // Get default section properties (portrait: width < height)
         var sec = handler.Get("/section[1]");
-        var origWidth = Convert.ToUInt32(sec.Format["pageWidth"]);
-        var origHeight = Convert.ToUInt32(sec.Format["pageHeight"]);
+        var origWidth = WordSectionLengthAssertions.ParseCm(sec.Format["pageWidth"]);
+        var origHeight = WordSectionLengthAssertions.ParseCm(sec.Format["pageHeight"]);
 
         // Portrait: width < height
         origWidth.Should().BeLessThan(origHeight, "Default should be portrait");
@@ -333,14 +332,12 @@ public class BugHuntPart34 : IDisposable
 
         // Read back
         var updated = handler.Get("/section[1]");
-        var newWidth = Convert.ToUInt32(updated.Format["pageWidth"]);
-        var newHeight = Convert.ToUInt32(updated.Format["pageHeight"]);
+        updated.Format["orientation"].Should().Be("landscape");
+        var newWidth = WordSectionLengthAssertions.ParseCm(updated.Format["pageWidth"]);
+        var newHeight = WordSectionLengthAssertions.ParseCm(updated.Format["pageHeight"]);
 
-        // Bug: orientation is set but dimensions are NOT swapped
-        // In landscape, width should be > height
         newWidth.Should().BeGreaterThan(newHeight,
-            "Setting landscape orientation should swap width and height, " +
-            "but only the orient attribute is set without dimension swap");
+            "landscape readback should report friendly width/height values with width greater than height");
     }
 
     // =====================================================================

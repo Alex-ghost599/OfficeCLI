@@ -174,11 +174,8 @@ public class BugHuntPart37 : IDisposable
     }
 
     // =====================================================================
-    // Bug3704: Word section Set orientation — only sets Orient, doesn't swap W/H
-    // The code at WordHandler.Set:
-    //   ps.Orient = value == "landscape" ? Landscape : Portrait;
-    // Only sets the Orient attribute without swapping W/H values.
-    // For landscape, width should be greater than height.
+    // Bug3704: Word section landscape readback should expose friendly lengths
+    // and preserve width > height after the existing swap logic runs.
     // =====================================================================
     [Fact]
     public void Bug3704_Word_Section_Orientation_Swap_WH_Not_Done()
@@ -194,20 +191,16 @@ public class BugHuntPart37 : IDisposable
 
         var secAfter = handler.Get("/section[1]");
 
-        if (secAfter.Format.ContainsKey("pageWidth") && secAfter.Format.ContainsKey("pageHeight"))
-        {
-            var w = Convert.ToInt32(secAfter.Format["pageWidth"]);
-            var h = Convert.ToInt32(secAfter.Format["pageHeight"]);
-            w.Should().BeGreaterThan(h,
-                "Landscape orientation requires width > height, " +
-                "but the code only sets the Orient attribute without swapping W and H values.");
-        }
-        else
-        {
-            // At minimum, verify the orientation attribute is set
-            secAfter.Format.Should().ContainKey("orientation",
-                "Section should expose orientation in Get after Set");
-        }
+        secAfter.Format.Should().ContainKey("orientation",
+            "Section should expose orientation in Get after Set");
+        secAfter.Format["orientation"].Should().Be("landscape");
+        secAfter.Format.Should().ContainKey("pageWidth");
+        secAfter.Format.Should().ContainKey("pageHeight");
+
+        var w = WordSectionLengthAssertions.ParseCm(secAfter.Format["pageWidth"]);
+        var h = WordSectionLengthAssertions.ParseCm(secAfter.Format["pageHeight"]);
+        w.Should().BeGreaterThan(h,
+            "landscape readback should report friendly width/height values with width greater than height.");
     }
 
     // =====================================================================
