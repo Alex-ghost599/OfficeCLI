@@ -290,8 +290,7 @@ public partial class PowerPointHandler
                 {
                     var spPr = shape.ShapeProperties;
                     if (spPr == null) { unsupported.Add(key); break; }
-                    // Check if value is a preset shape name (no spaces, no commas, simple identifier)
-                    if (!value.Contains(' ') && !value.Contains(',') && !value.Contains('M'))
+                    if (!LooksLikeCustomGeometryPath(value))
                     {
                         // Treat as preset shape name
                         spPr.RemoveAllChildren<Drawing.CustomGeometry>();

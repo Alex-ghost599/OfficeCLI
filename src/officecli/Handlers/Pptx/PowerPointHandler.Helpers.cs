@@ -1043,6 +1043,27 @@ public partial class PowerPointHandler
     }
 
     /// <summary>
+    /// Distinguish preset names (rect, roundRect, rightArrow) from SVG-like custom paths.
+    /// The CLI treats command-style values such as "M 0,0 L 100,0 ... Z" as custom geometry.
+    /// </summary>
+    private static bool LooksLikeCustomGeometryPath(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        var trimmed = value.Trim();
+        if (trimmed.Contains(','))
+            return true;
+
+        var firstToken = trimmed
+            .Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault()?
+            .ToUpperInvariant();
+
+        return firstToken is "M" or "L" or "C" or "Q" or "A" or "Z" or "H" or "V" or "S" or "T";
+    }
+
+    /// <summary>
     /// Change the z-order of a shape within the ShapeTree.
     /// Values: "front" (topmost), "back" (bottommost), "forward" (+1), "backward" (-1),
     ///         or an integer for absolute position (1-based, 1 = back, N = front).
