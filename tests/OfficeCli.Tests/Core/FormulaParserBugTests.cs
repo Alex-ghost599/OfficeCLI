@@ -8,9 +8,11 @@ namespace OfficeCli.Tests.Core;
 public class FormulaParserBugTests
 {
     [Fact]
-    public void Parse_NullInput_ThrowsNullReferenceException_Bug()
+    public void Parse_NullInput_ThrowsWrappedFormulaParseException()
     {
-        Assert.Throws<NullReferenceException>(() => FormulaParser.Parse(null));
+        var ex = Assert.Throws<FormulaParseException>(() => FormulaParser.Parse(null));
+        Assert.Contains("Failed to parse formula:", ex.Message);
+        Assert.IsType<NullReferenceException>(ex.InnerException);
     }
 
     [Fact]
