@@ -547,8 +547,8 @@ public partial class WordHandler
                 InsertRunPropInSchemaOrder(props, new Highlight { Val = ParseHighlightColor(value) });
                 break;
             case "underline":
-                props.RemoveAllChildren<Underline>();
                 var ulMapped = value.ToLowerInvariant() switch { "true" => "single", "false" or "none" => "none", _ => value };
+                props.RemoveAllChildren<Underline>();
                 InsertRunPropInSchemaOrder(props, new Underline { Val = new UnderlineValues(ulMapped) });
                 break;
             case "strike":
@@ -599,6 +599,14 @@ public partial class WordHandler
         }
     }
 
+    private static void ReplaceRunPropertyInSchemaOrder<T>(OpenXmlCompositeElement props, T? elem)
+        where T : OpenXmlElement
+    {
+        props.RemoveAllChildren<T>();
+        if (elem != null)
+            InsertRunPropInSchemaOrder(props, elem);
+    }
+
     /// <summary>
     /// Insert a run property element in the correct CT_RPr schema position.
     /// CT_RPr order: rFonts, b, bCs, i, iCs, caps, smallCaps, strike, dstrike, outline, shadow,
@@ -607,45 +615,7 @@ public partial class WordHandler
     /// </summary>
     private static void InsertRunPropInSchemaOrder(OpenXmlCompositeElement props, OpenXmlElement elem)
     {
-        // Map element types to their position in the CT_RPr schema sequence.
-        // Only the types we actually use are listed; unlisted types get a high index (appended at end).
-        static int SchemaIndex(OpenXmlElement e) => e switch
-        {
-            RunFonts => 0,
-            Bold => 1,
-            BoldComplexScript => 2,
-            Italic => 3,
-            ItalicComplexScript => 4,
-            Caps => 5,
-            SmallCaps => 6,
-            Strike => 7,
-            // dstrike, outline, shadow, emboss, imprint, noProof, snapToGrid
-            Vanish => 14,
-            // webHidden = 15
-            Color => 16,
-            Spacing => 17,
-            // w = 18, kern = 19, position = 20
-            FontSize => 21,
-            FontSizeComplexScript => 22,
-            Highlight => 23,
-            Underline => 24,
-            // effect, ...
-            _ => 100,
-        };
-
-        int targetIdx = SchemaIndex(elem);
-
-        // Find the first existing child whose schema position is after the element we're inserting
-        foreach (var child in props.ChildElements)
-        {
-            if (SchemaIndex(child) > targetIdx)
-            {
-                child.InsertBeforeSelf(elem);
-                return;
-            }
-        }
-        // No later element found — append at end
-        props.AppendChild(elem);
+        props.AddChild(elem, throwOnError: false);
     }
 
     private static string GetBookmarkText(BookmarkStart bkStart)
