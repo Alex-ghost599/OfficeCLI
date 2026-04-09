@@ -663,10 +663,9 @@ public class BugHuntPart34 : IDisposable
     }
 
     // =====================================================================
-    // Bug3419: Excel Set formula clears DataType but doesn't handle shared strings
-    // When a cell has a shared string value and you set a formula,
-    // the DataType is cleared but the shared string index might remain
-    // as CellValue, potentially causing confusion when reading.
+    // Bug3419: Excel formula readback uses split semantics:
+    // Format["formula"] keeps the source formula, while Text reports
+    // the display/evaluated result instead of echoing "=...".
     // =====================================================================
     [Fact]
     public void Bug3419_Excel_Set_Formula_After_SharedString()
@@ -692,8 +691,8 @@ public class BugHuntPart34 : IDisposable
         // Formula should be set
         node.Format.Should().ContainKey("formula");
         node.Format["formula"].ToString().Should().Be("1+1");
-        // Old value should be cleared
-        node.Text.Should().Be("=1+1");
+        // Display text reflects the evaluated result, not the formula source
+        node.Text.Should().Be("2");
     }
 
     // =====================================================================
