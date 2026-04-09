@@ -521,80 +521,72 @@ public partial class WordHandler
         switch (key.ToLowerInvariant())
         {
             case "size":
-                var existingFs = props.GetFirstChild<FontSize>();
-                if (existingFs != null) existingFs.Val = ((int)Math.Round(ParseFontSize(value) * 2, MidpointRounding.AwayFromZero)).ToString();
-                else props.AppendChild(new FontSize { Val = ((int)Math.Round(ParseFontSize(value) * 2, MidpointRounding.AwayFromZero)).ToString() });
+                ReplaceRunPropertyInSchemaOrder(props, new FontSize
+                {
+                    Val = ((int)Math.Round(ParseFontSize(value) * 2, MidpointRounding.AwayFromZero)).ToString()
+                });
                 break;
             case "font":
-                var existingRf = props.GetFirstChild<RunFonts>();
-                if (existingRf != null) { existingRf.Ascii = value; existingRf.HighAnsi = value; existingRf.EastAsia = value; }
-                else props.AppendChild(new RunFonts { Ascii = value, HighAnsi = value, EastAsia = value });
+                ReplaceRunPropertyInSchemaOrder(props, new RunFonts { Ascii = value, HighAnsi = value, EastAsia = value });
                 break;
             case "bold":
-                props.RemoveAllChildren<Bold>();
-                if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Bold());
+                ReplaceRunPropertyInSchemaOrder(props, IsTruthy(value) ? new Bold() : null);
                 break;
             case "italic":
-                props.RemoveAllChildren<Italic>();
-                if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Italic());
+                ReplaceRunPropertyInSchemaOrder(props, IsTruthy(value) ? new Italic() : null);
                 break;
             case "color":
-                props.RemoveAllChildren<Color>();
-                InsertRunPropInSchemaOrder(props, new Color { Val = SanitizeHex(value) });
+                ReplaceRunPropertyInSchemaOrder(props, new Color { Val = SanitizeHex(value) });
                 break;
             case "highlight":
-                props.RemoveAllChildren<Highlight>();
-                InsertRunPropInSchemaOrder(props, new Highlight { Val = ParseHighlightColor(value) });
+                ReplaceRunPropertyInSchemaOrder(props, new Highlight { Val = ParseHighlightColor(value) });
                 break;
             case "underline":
                 var ulMapped = value.ToLowerInvariant() switch { "true" => "single", "false" or "none" => "none", _ => value };
-                props.RemoveAllChildren<Underline>();
-                InsertRunPropInSchemaOrder(props, new Underline { Val = new UnderlineValues(ulMapped) });
+                ReplaceRunPropertyInSchemaOrder(props, new Underline { Val = new UnderlineValues(ulMapped) });
                 break;
             case "strike":
-                props.RemoveAllChildren<Strike>();
-                if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Strike());
+                ReplaceRunPropertyInSchemaOrder(props, IsTruthy(value) ? new Strike() : null);
                 break;
             case "charspacing" or "charSpacing" or "letterspacing" or "letterSpacing" or "spacing":
                 var csPt = value.EndsWith("pt", StringComparison.OrdinalIgnoreCase)
                     ? ParseHelpers.SafeParseDouble(value[..^2], "charspacing")
                     : ParseHelpers.SafeParseDouble(value, "charspacing");
-                props.RemoveAllChildren<Spacing>();
-                InsertRunPropInSchemaOrder(props, new Spacing { Val = (int)Math.Round(csPt * 20, MidpointRounding.AwayFromZero) });
+                ReplaceRunPropertyInSchemaOrder(props, new Spacing { Val = (int)Math.Round(csPt * 20, MidpointRounding.AwayFromZero) });
                 break;
             case "shading" or "shd":
-                props.RemoveAllChildren<Shading>();
                 var shdParts = value.Split(';');
                 if (shdParts.Length == 1)
-                    props.AppendChild(new Shading { Val = ShadingPatternValues.Clear, Fill = SanitizeHex(shdParts[0]) });
+                    ReplaceRunPropertyInSchemaOrder(props, new Shading
+                    {
+                        Val = ShadingPatternValues.Clear,
+                        Fill = SanitizeHex(shdParts[0])
+                    });
                 else
                 {
                     var shd = new Shading { Val = new ShadingPatternValues(shdParts[0]), Fill = SanitizeHex(shdParts[1]) };
                     if (shdParts.Length >= 3) shd.Color = SanitizeHex(shdParts[2]);
-                    props.AppendChild(shd);
+                    ReplaceRunPropertyInSchemaOrder(props, shd);
                 }
                 break;
             case "superscript":
-                props.RemoveAllChildren<VerticalTextAlignment>();
-                if (IsTruthy(value))
-                    props.AppendChild(new VerticalTextAlignment { Val = VerticalPositionValues.Superscript });
+                ReplaceRunPropertyInSchemaOrder(props, IsTruthy(value)
+                    ? new VerticalTextAlignment { Val = VerticalPositionValues.Superscript }
+                    : null);
                 break;
             case "subscript":
-                props.RemoveAllChildren<VerticalTextAlignment>();
-                if (IsTruthy(value))
-                    props.AppendChild(new VerticalTextAlignment { Val = VerticalPositionValues.Subscript });
+                ReplaceRunPropertyInSchemaOrder(props, IsTruthy(value)
+                    ? new VerticalTextAlignment { Val = VerticalPositionValues.Subscript }
+                    : null);
                 break;
             case "caps":
-                props.RemoveAllChildren<Caps>();
-                if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Caps());
+                ReplaceRunPropertyInSchemaOrder(props, IsTruthy(value) ? new Caps() : null);
                 break;
             case "smallcaps":
-                props.RemoveAllChildren<SmallCaps>();
-                if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new SmallCaps());
+                ReplaceRunPropertyInSchemaOrder(props, IsTruthy(value) ? new SmallCaps() : null);
                 break;
             case "vanish":
-                props.RemoveAllChildren<Vanish>();
-                if (IsTruthy(value)) InsertRunPropInSchemaOrder(props, new Vanish());
+                ReplaceRunPropertyInSchemaOrder(props, IsTruthy(value) ? new Vanish() : null);
                 break;
         }
     }
