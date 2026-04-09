@@ -902,7 +902,7 @@ public class BugHuntPart47 : IDisposable
     }
 
     // ==================== Bug4726 ====================
-    // PPTX list style round-trip.
+    // PPTX list style round-trip uses the normalized friendly value contract.
     [Fact]
     public void Bug4726_PptxListStyleRoundTrip()
     {
@@ -925,10 +925,9 @@ public class BugHuntPart47 : IDisposable
         node.Format.Should().ContainKey("list",
             because: "list style should be readable after setting");
 
-        // CharacterBullet with "•" char
         var listVal = node.Format["list"]?.ToString() ?? "";
-        listVal.Should().Be("•",
-            because: "bullet list style should read back as the bullet character '•'");
+        listVal.Should().Be("bullet",
+            because: "bullet character styles are normalized to the friendly value 'bullet'");
     }
 
     // ==================== Bug4727 ====================
