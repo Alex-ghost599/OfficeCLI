@@ -441,7 +441,7 @@ public class BtBugRegressionTests : IDisposable
         // The unsupported list should contain "name" but the suggestion
         // should NOT be "name" itself
         var unsupported = pptx.Set("/slide[1]/shape[1]", new() { ["fakeProp123"] = "value" });
-        unsupported.Should().Contain("fakeProp123");
+        unsupported.Should().ContainSingle(u => u.StartsWith("fakeProp123", StringComparison.Ordinal));
         // This is a sanity check — the suggestion system should not crash
     }
 }
