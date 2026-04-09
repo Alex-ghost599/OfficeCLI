@@ -539,8 +539,6 @@ public partial class WordHandler
                     }
                 }
 
-                AddWordParagraphLegacyAliases(node);
-
                 var pBdr = pProps.ParagraphBorders;
                 if (pBdr != null)
                 {
@@ -569,6 +567,8 @@ public partial class WordHandler
                             node.Format["start"] = start.Value;
                     }
                 }
+
+                AddWordParagraphLegacyAliases(node);
             }
 
             // First-run formatting on the paragraph node (like PPTX does for shapes).
