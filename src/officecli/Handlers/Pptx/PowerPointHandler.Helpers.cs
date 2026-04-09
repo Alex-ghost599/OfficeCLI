@@ -246,8 +246,9 @@ public partial class PowerPointHandler
     }
 
     /// <summary>
-    /// Build a path segment using @id= if the element has a cNvPr.Id, otherwise use positional index.
-    /// E.g. "shape[@id=5]" or "shape[2]".
+    /// Build the canonical PPT path segment for a top-level element.
+    /// Prefer @id= when the element has a cNvPr.Id because that output stays stable across edits;
+    /// positional [N] remains accepted for input compatibility.
     /// </summary>
     internal static string BuildElementPathSegment(string elementType, OpenXmlElement element, int positionalIndex)
     {

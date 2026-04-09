@@ -1209,16 +1209,17 @@ PowerPoint (.pptx) — get
 Paths:
   /                                          Presentation root (lists slides)
   /slide[1]                                  Slide 1 (lists shapes, tables, placeholders)
-  /slide[1]/shape[1]                         Shape or text box
-  /slide[1]/table[1]                         Table
-  /slide[1]/table[1]/tr[1]                   Table row
-  /slide[1]/table[1]/tr[1]/tc[1]             Table cell
+  /slide[1]/shape[@id=10000]                 Canonical shape/textbox path (@id is preferred in output)
+  /slide[1]/table[@id=10001]                 Canonical table path (@id is preferred in output)
+  /slide[1]/chart[@id=10002]                 Canonical chart path (@id is preferred in output)
+  /slide[1]/table[@id=10001]/tr[1]           Table row
+  /slide[1]/table[@id=10001]/tr[1]/tc[1]     Table cell
   /slide[1]/placeholder[1]                   Placeholder by ordinal
   /slide[1]/placeholder[title]               Placeholder by type name
   /slide[1]/notes                            Speaker notes (text)
-  /slide[1]/shape[1]/paragraph[1]            Paragraph in shape
-  /slide[1]/shape[1]/paragraph[1]/run[1]     Run in paragraph
-  /slide[1]/shape[1]/run[1]                  Run shortcut (flat index across paragraphs)
+  /slide[1]/shape[@id=10000]/paragraph[1]    Paragraph in shape
+  /slide[1]/shape[@id=10000]/paragraph[1]/run[1]  Run in paragraph
+  /slide[1]/shape[@id=10000]/run[1]          Run shortcut (flat index across paragraphs)
   /slide[1]/cSld/spTree/sp[1]/spPr           Shape properties XML element
 
 Format keys returned by Get:
@@ -1231,7 +1232,7 @@ Format keys returned by Get:
     advanceTime   Auto-advance time in ms (if set)
     advanceClick  false if click-advance is disabled
 
-  Shape/textbox (/slide[N]/shape[M]):
+  Shape/textbox (/slide[N]/shape[@id=X]):
     text, name, type (textbox/title)
     x, y, width, height    Position and size (e.g. "2cm")
     font, size, bold, italic
@@ -1243,7 +1244,7 @@ Format keys returned by Get:
     gradient               Linear "C1-C2[-angle]", radial "radial:C1-C2[-focus]" (focus: tl/tr/bl/br/center)
     image                  Shape image fill (path to image file)
     line, lineWidth, lineDash, lineOpacity (0.0–1.0)
-    preset / geometry       Shape geometry name (e.g. roundRect, ellipse, diamond)
+    preset / geometry       Preset shape name or custom freeform geometry path
     align, valign
     lineSpacing            Unit-qualified: "1.5x" (multiplier) or "18pt" (fixed)
     spaceBefore, spaceAfter  Unit-qualified: "12pt" from first paragraph
@@ -1257,10 +1258,10 @@ Format keys returned by Get:
     animation              Flexible: "effect[-class][-direction][-duration][-trigger]" (e.g. "fly-left-400")
                            Trigger default: 1st on slide = click, subsequent = after (sequential)
 
-  Chart (/slide[N]/chart[M]):
+  Chart (/slide[N]/chart[@id=X]):
     chartType              column, bar, line, pie, doughnut, area, scatter, bubble, radar, stock
     title                  Chart title text
-    legend                 Legend position (t/b/l/r)
+    legend                 Legend position (top/bottom/left/right)
     seriesCount            Number of data series
     categories             Comma-separated category labels
     x, y, width, height    Position and size
@@ -1488,7 +1489,7 @@ Master/Layout editing (/slideMaster[N] or /slideLayout[N]):
   /slideMaster[N]/shape[M] or /slideLayout[N]/shape[M]  — set shape properties
 
 Presentation properties (/ or /presentation):
-  slideSize    Preset: 16:9, 4:3, 16:10, a4
+  slideSize    Preset input: 16:9, 4:3, 16:10, a4; Get() readback uses widescreen/standard/16:10/a4
   slideWidth   Custom width (EMU or cm/in/pt/px)
   slideHeight  Custom height (EMU or cm/in/pt/px)
   firstSlideNum    First slide number (default 1)
