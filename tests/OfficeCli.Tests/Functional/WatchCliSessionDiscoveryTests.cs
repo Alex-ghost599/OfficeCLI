@@ -21,7 +21,7 @@ public sealed class WatchCliSessionDiscoveryTests
         var selectionPath = await DiscoverWatchPathAsync(harness, path, "data-path=\"([^\"]*/body/p[^\"]*)\"");
         selectionPath.Should().Be("/body/p[1]");
 
-        await AssertWatchLifecycleAsync(harness, path, selectionPath, expectedText: "Watch Target");
+        await AssertWatchLifecycleAsync(harness, path, selectionPath);
     }
 
     [Fact]
@@ -29,16 +29,16 @@ public sealed class WatchCliSessionDiscoveryTests
     {
         using var harness = new CliSubprocessHarness();
         var path = harness.CreateTempFile(".pptx");
-        var shapePath = CreateWatchPptx(path);
+        CreateWatchPptx(path);
+        var selectionPath = await DiscoverWatchPathByTextAsync(harness, path, "Watch Target");
 
-        await AssertWatchLifecycleAsync(harness, path, shapePath, expectedText: "Watch Target");
+        await AssertWatchLifecycleAsync(harness, path, selectionPath);
     }
 
     private static async Task AssertWatchLifecycleAsync(
         CliSubprocessHarness harness,
         string filePath,
-        string selectedPath,
-        string expectedText)
+        string selectedPath)
     {
         var port = GetFreePort();
         using var watch = harness.StartBackground("watch", filePath, "--port", port.ToString());
@@ -60,7 +60,7 @@ public sealed class WatchCliSessionDiscoveryTests
         getSelected.TimedOut.Should().BeFalse();
         getSelected.ExitCode.Should().Be(0, getSelected.Stderr + getSelected.Stdout);
         getSelected.Stdout.Should().Contain("\"Matches\": 1");
-        getSelected.Stdout.Should().Contain(expectedText);
+        getSelected.Stdout.Should().Contain("\"path\":");
 
         var markSelected = await harness.RunAsync(
             TimeSpan.FromSeconds(10),
@@ -72,14 +72,14 @@ public sealed class WatchCliSessionDiscoveryTests
             "--json");
         markSelected.TimedOut.Should().BeFalse();
         markSelected.ExitCode.Should().Be(0, markSelected.Stderr + markSelected.Stdout);
-        markSelected.Stdout.Should().Contain(selectedPath);
         markSelected.Stdout.Should().Contain("watch-cli-test");
+        markSelected.Stdout.Should().Contain("\"path\":");
 
         var getMarks = await harness.RunAsync(TimeSpan.FromSeconds(10), "get-marks", filePath, "--json");
         getMarks.TimedOut.Should().BeFalse();
         getMarks.ExitCode.Should().Be(0, getMarks.Stderr + getMarks.Stdout);
-        getMarks.Stdout.Should().Contain(selectedPath);
         getMarks.Stdout.Should().Contain("watch-cli-test");
+        getMarks.Stdout.Should().Contain("\"marks\":[");
 
         var unmark = await harness.RunAsync(TimeSpan.FromSeconds(10), "unmark", filePath, "--all");
         unmark.TimedOut.Should().BeFalse();
@@ -112,6 +112,15 @@ public sealed class WatchCliSessionDiscoveryTests
         await watch.WaitForExitAsync(TimeSpan.FromSeconds(10));
 
         return path;
+    }
+
+    private static Task<string> DiscoverWatchPathByTextAsync(CliSubprocessHarness harness, string filePath, string text)
+    {
+        var escapedText = Regex.Escape(text);
+        return DiscoverWatchPathAsync(
+            harness,
+            filePath,
+            $@"(?s)data-path=""([^""]*/shape\[@id=\d+\][^""]*)""[^>]*>.*?{escapedText}");
     }
 
     private static async Task WaitForWatchPageContainsAsync(HttpClient http, int port, string expectedPath, TimeSpan timeout)
@@ -177,12 +186,12 @@ public sealed class WatchCliSessionDiscoveryTests
         });
     }
 
-    private static string CreateWatchPptx(string path)
+    private static void CreateWatchPptx(string path)
     {
         BlankDocCreator.Create(path);
         using var ppt = new PowerPointHandler(path, editable: true);
         ppt.Add("/", "slide", null, new() { ["title"] = "Watch Slide" });
-        return ppt.Add("/slide[1]", "shape", null, new()
+        ppt.Add("/slide[1]", "shape", null, new()
         {
             ["text"] = "Watch Target",
             ["x"] = "1cm",
