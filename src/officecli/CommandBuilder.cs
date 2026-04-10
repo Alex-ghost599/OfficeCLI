@@ -166,6 +166,9 @@ static partial class CommandBuilder
         rootCommand.Add(BuildCreateCommand(jsonOption));
         rootCommand.Add(BuildMergeCommand(jsonOption));
 
+        rootCommand.Add(new Command("install", "Install the officecli binary only; use 'officecli setup' for optional PATH, skills, MCP, and update settings"));
+        rootCommand.Add(new Command("setup", "Optional post-install setup for PATH, skills, MCP, macOS compatibility, and auto-update"));
+
         HelpCommands.Register(rootCommand);
 
         return rootCommand;
