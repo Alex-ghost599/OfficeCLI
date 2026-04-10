@@ -71,15 +71,19 @@ static partial class CommandBuilder
                 Arguments = $"__resident-serve__ \"{filePath}\"",
                 UseShellExecute = false,
                 CreateNoWindow = true,
-                RedirectStandardOutput = false,
-                RedirectStandardError = false
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
             };
 
             var process = Process.Start(startInfo);
             if (process == null)
                 throw new InvalidOperationException("Failed to start resident process.");
 
-            var startedProbe = WaitForResidentReady(filePath, process, ResidentStartupTimeout);
+            var stdoutSink = new StringBuilder();
+            var stderrSink = new StringBuilder();
+            AttachProcessOutput(process, stdoutSink, stderrSink);
+
+            var startedProbe = WaitForResidentReady(filePath, process, ResidentStartupTimeout, () => stderrSink.ToString());
             if (startedProbe.State == ResidentProbeState.Ready)
             {
                 var msg = $"Opened {file.Name} (remember to call close when done)";
@@ -266,6 +270,20 @@ static partial class CommandBuilder
         }
 
         return lastProbe;
+    }
+
+    private static void AttachProcessOutput(Process process, StringBuilder stdoutSink, StringBuilder stderrSink)
+    {
+        process.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data != null) stdoutSink.AppendLine(e.Data);
+        };
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data != null) stderrSink.AppendLine(e.Data);
+        };
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
     }
 
     private static bool WaitForResidentStop(string filePath, TimeSpan timeout)

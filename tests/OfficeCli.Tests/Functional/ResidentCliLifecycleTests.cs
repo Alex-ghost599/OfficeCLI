@@ -38,31 +38,25 @@ public sealed class ResidentCliLifecycleTests
 
     private static async Task AssertResidentLifecycleAsync(CliSubprocessHarness harness, string path)
     {
-        var cli = harness.CliExecutablePath;
-        var shell = $"""
-            set +e
-            "{cli}" open "{path}"
-            echo "__RC_OPEN:$?"
-            "{cli}" open "{path}"
-            echo "__RC_OPEN2:$?"
-            "{cli}" close "{path}"
-            echo "__RC_CLOSE:$?"
-            "{cli}" close "{path}"
-            echo "__RC_CLOSE2:$?"
-            exit 0
-            """;
+        var open = await harness.RunAsync(TimeSpan.FromSeconds(15), "open", path);
+        open.TimedOut.Should().BeFalse("resident open must return promptly once startup is complete");
+        open.ExitCode.Should().Be(0, open.Stderr + open.Stdout);
+        open.Stdout.Should().Contain("Opened");
 
-        var result = await harness.RunShellAsync(TimeSpan.FromSeconds(45), shell);
-        result.TimedOut.Should().BeFalse();
-        result.ExitCode.Should().Be(0, result.Stderr + result.Stdout);
-        result.Stdout.Should().Contain("Opened");
-        result.Stdout.Should().Contain("already running");
-        result.Stdout.Should().Contain("Resident closed");
-        result.Stdout.Should().Contain("__RC_OPEN:0");
-        result.Stdout.Should().Contain("__RC_OPEN2:0");
-        result.Stdout.Should().Contain("__RC_CLOSE:0");
-        result.Stdout.Should().Contain("__RC_CLOSE2:1");
-        result.Stderr.Should().Contain("No resident running");
+        var open2 = await harness.RunAsync(TimeSpan.FromSeconds(15), "open", path);
+        open2.TimedOut.Should().BeFalse();
+        open2.ExitCode.Should().Be(0, open2.Stderr + open2.Stdout);
+        open2.Stdout.Should().Contain("already running");
+
+        var close = await harness.RunAsync(TimeSpan.FromSeconds(15), "close", path);
+        close.TimedOut.Should().BeFalse();
+        close.ExitCode.Should().Be(0, close.Stderr + close.Stdout);
+        close.Stdout.Should().Contain("Resident closed");
+
+        var close2 = await harness.RunAsync(TimeSpan.FromSeconds(15), "close", path);
+        close2.TimedOut.Should().BeFalse();
+        close2.ExitCode.Should().Be(1);
+        close2.Stderr.Should().Contain("No resident running");
     }
 
     private static void CreateResidentDocx(string path)
