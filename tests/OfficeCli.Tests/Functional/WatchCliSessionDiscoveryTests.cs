@@ -35,6 +35,17 @@ public sealed class WatchCliSessionDiscoveryTests
         await AssertWatchLifecycleAsync(harness, path, selectionPath);
     }
 
+    [Fact]
+    public async Task WatchCli_Pptx_CompanionCommands_CanDiscoverSelectionMarksAndClose_WithLongTmpDir()
+    {
+        using var harness = new CliSubprocessHarness(useLongTmpLayout: true);
+        var path = harness.CreateTempFile(".pptx");
+        CreateWatchPptx(path);
+        var selectionPath = await DiscoverWatchPathByTextAsync(harness, path, "Watch Target");
+
+        await AssertWatchLifecycleAsync(harness, path, selectionPath);
+    }
+
     private static async Task AssertWatchLifecycleAsync(
         CliSubprocessHarness harness,
         string filePath,
