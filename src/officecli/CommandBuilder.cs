@@ -71,15 +71,19 @@ static partial class CommandBuilder
                 Arguments = $"__resident-serve__ \"{filePath}\"",
                 UseShellExecute = false,
                 CreateNoWindow = true,
-                RedirectStandardOutput = false,
-                RedirectStandardError = false
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
             };
 
             var process = Process.Start(startInfo);
             if (process == null)
                 throw new InvalidOperationException("Failed to start resident process.");
 
-            var startedProbe = WaitForResidentReady(filePath, process, ResidentStartupTimeout);
+            var stdoutSink = new StringBuilder();
+            var stderrSink = new StringBuilder();
+            AttachProcessOutput(process, stdoutSink, stderrSink);
+
+            var startedProbe = WaitForResidentReady(filePath, process, ResidentStartupTimeout, () => stderrSink.ToString());
             if (startedProbe.State == ResidentProbeState.Ready)
             {
                 var msg = $"Opened {file.Name} (remember to call close when done)";
