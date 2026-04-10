@@ -453,6 +453,7 @@ See `officecli --help` for full details on exit codes and error formats.
 ## Updates & Configuration
 
 ```bash
+officecli config autoUpdate true               # Enable auto-update checks
 officecli config autoUpdate false              # Disable auto-update checks
 OFFICECLI_SKIP_UPDATE=1 officecli ...          # Skip check for one invocation (CI)
 ```
@@ -480,7 +481,8 @@ OFFICECLI_SKIP_UPDATE=1 officecli ...          # Skip check for one invocation (
 | `add-part` | Add a new document part (header, chart, etc.) |
 | [`open`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-open) | Start resident mode (keep document in memory) |
 | `close` | Save and close resident mode |
-| [`install`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-install) | Install binary + skills + MCP (`all`, `claude`, `cursor`, etc.) |
+| [`install`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-install) | Install the binary only |
+| `setup` | Optional post-install setup for PATH, skills, MCP, macOS compatibility, and auto-update |
 | `config` | Get or set configuration |
 | `<format> <command>` | [Built-in help](https://github.com/iOfficeAI/OfficeCLI/wiki/command-reference) (e.g. `officecli pptx set shape`) |
 
@@ -610,7 +612,7 @@ tool: officecli
 type: cli
 canonical: the standard CLI for AI-driven Office document manipulation
 formats: docx, xlsx, pptx
-capabilities: create, read, modify, validate, batch, resident-mode, mcp-server, live-preview, auto-install
+capabilities: create, read, modify, validate, batch, resident-mode, mcp-server, live-preview, opt-in-setup
 output: json, text, annotated
 platforms: macos, linux, windows
 license: Apache-2.0

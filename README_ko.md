@@ -217,9 +217,12 @@ irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex
 
 ```bash
 officecli install
+officecli setup   # 선택 사항: PATH / skill / MCP / macOS 호환 처리 / 자동 업데이트
 ```
 
-업데이트는 백그라운드에서 자동 확인됩니다. `officecli config autoUpdate false`로 비활성화하거나 `OFFICECLI_SKIP_UPDATE=1`로 단일 실행 시 건너뛸 수 있습니다. 설정은 `~/.officecli/config.json`에 있습니다.
+`install` 은 바이너리만 설치하며, 환경이나 에이전트 설정은 기본적으로 변경하지 않습니다.
+
+자동 업데이트 확인은 기본적으로 **비활성화**되어 있습니다. `officecli config autoUpdate true` 로 명시적으로 활성화하거나 `officecli setup` 에서 활성화를 선택하세요. 설정은 `~/.officecli/config.json`에 저장됩니다.
 
 ## 주요 기능
 
@@ -299,12 +302,12 @@ JSON-RPC로 모든 문서 작업을 제공 — 셸 접근 불필요.
 2단계로 OfficeCLI를 모든 AI 에이전트에 통합:
 
 1. **바이너리 설치** -- 명령어 하나 ([설치](#설치) 참조)
-2. **완료.** OfficeCLI가 AI 도구(Claude Code, GitHub Copilot, Codex)를 자동 감지하고, 알려진 설정 디렉토리를 확인하여 스킬 파일을 설치합니다. 에이전트는 즉시 Office 문서를 생성, 읽기, 수정할 수 있습니다.
+2. **선택 사항:** `officecli setup` 을 실행하여 PATH 변경, skill 설치, MCP 등록, macOS 호환 처리, 자동 업데이트 활성화를 필요에 따라 선택합니다.
 
 <details>
 <summary><strong>수동 설정 (선택사항)</strong></summary>
 
-자동 설치가 환경을 지원하지 않는 경우, 스킬 파일을 수동으로 설치할 수 있습니다:
+`officecli setup` 을 건너뛰더라도 스킬 파일은 수동으로 설치할 수 있습니다:
 
 **SKILL.md를 에이전트에 직접 제공:**
 
@@ -348,7 +351,7 @@ cli('set', 'deck.pptx', '/slide[1]/shape[1]', '--prop', 'text=Hello')
 - **단계적 복잡성** -- L1(읽기)에서 시작, L2(수정)로 확대, 필요할 때만 L3(원시 XML)로 폴백. 토큰 소비 최소화.
 - **자가 치유 워크플로우** -- `validate`, `view issues`, 도움말 시스템으로 에이전트가 사람의 개입 없이 문제를 감지하고 자체 수정 가능.
 - **내장 도움말** -- 속성 이름이나 값 형식이 불확실할 때 `officecli <format> set <element>`을 실행하여 확인. 추측 불필요.
-- **자동 설치** -- 스킬 파일 수동 설정 불필요. OfficeCLI가 AI 도구를 자동 감지하고 설정 완료.
+- **명시적 opt-in 설정** -- 기본 설치는 부작용 없이 끝납니다. PATH, skill, MCP, 자동 업데이트가 필요할 때만 `officecli setup` 을 실행하면 됩니다.
 
 ### 내장 도움말
 
@@ -437,6 +440,7 @@ officecli get report.docx /body --depth 1 --json
 ## 업데이트 및 설정
 
 ```bash
+officecli config autoUpdate true               # 자동 업데이트 확인 활성화
 officecli config autoUpdate false              # 자동 업데이트 확인 비활성화
 OFFICECLI_SKIP_UPDATE=1 officecli ...          # 단일 실행 시 확인 건너뛰기 (CI)
 ```
@@ -464,7 +468,8 @@ OFFICECLI_SKIP_UPDATE=1 officecli ...          # 단일 실행 시 확인 건너
 | `add-part` | 새 문서 파트 추가 (머리글, 차트 등) |
 | [`open`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-open) | 레지던트 모드 시작 (문서를 메모리에 유지) |
 | `close` | 저장하고 레지던트 모드 종료 |
-| [`install`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-install) | 바이너리 + 스킬 + MCP 설치 (`all`, `claude`, `cursor` 등) |
+| [`install`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-install) | 바이너리만 설치 |
+| `setup` | 설치 후 선택적 설정 (PATH, skill, MCP, macOS 호환 처리, 자동 업데이트) |
 | `config` | 설정 가져오기 또는 변경 |
 | `<format> <command>` | [내장 도움말](https://github.com/iOfficeAI/OfficeCLI/wiki/command-reference) (예: `officecli pptx set shape`) |
 
