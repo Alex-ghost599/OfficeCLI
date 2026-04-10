@@ -39,6 +39,21 @@ public class ResidentServer : IDisposable
         return $"officecli-{hash}";
     }
 
+    public static string GetPingPipeName(string filePath)
+    {
+        // Keep the Unix-domain socket path short enough for macOS/Linux TMPDIR-based
+        // CoreFxPipe_* transport. The old "-ping" suffix can overflow the platform
+        // limit once TMPDIR is non-trivial, while the main resident pipe still fits.
+        return GetPipeName(filePath) + "-p";
+    }
+
+    public static IEnumerable<string> GetPingPipeCandidates(string filePath)
+    {
+        var basePipeName = GetPipeName(filePath);
+        yield return basePipeName + "-p";
+        yield return basePipeName + "-ping";
+    }
+
     public async Task RunAsync(CancellationToken externalToken = default)
     {
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, externalToken);
@@ -144,7 +159,7 @@ public class ResidentServer : IDisposable
 
     private async Task RunPingResponderAsync(CancellationToken token)
     {
-        var pingPipeName = _pipeName + "-ping";
+        var pingPipeName = GetPingPipeName(_filePath);
 
         // BUG-FUZZER-R6-B-01: pre-create the next server instance BEFORE the
         // current one is disposed, so there is no window where TryConnect can
