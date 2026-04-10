@@ -818,7 +818,18 @@ public class WatchServer : IDisposable
             fullPath = fullPath.ToUpperInvariant();
         var hash = Convert.ToHexString(
             System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(fullPath)))[..16];
-        return $"officecli-watch-{hash}";
+        return $"ocw-{hash}";
+    }
+
+    public static IEnumerable<string> GetWatchPipeCandidates(string filePath)
+    {
+        var fullPath = Path.GetFullPath(filePath);
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())
+            fullPath = fullPath.ToUpperInvariant();
+        var hash = Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(fullPath)))[..16];
+        yield return $"ocw-{hash}";
+        yield return $"officecli-watch-{hash}";
     }
 
     /// <summary>
@@ -829,21 +840,32 @@ public class WatchServer : IDisposable
     {
         try
         {
-            int? result = null;
-            var task = Task.Run(() =>
+            foreach (var pipeName in GetWatchPipeCandidates(filePath))
             {
-                var pipeName = GetWatchPipeName(filePath);
-                using var client = new System.IO.Pipes.NamedPipeClientStream(".", pipeName, System.IO.Pipes.PipeDirection.InOut);
-                client.Connect(100);
-                var noBom = new UTF8Encoding(false);
-                using var writer = new StreamWriter(client, noBom, leaveOpen: true) { AutoFlush = true };
-                writer.WriteLine("ping");
-                writer.Flush();
-                using var reader = new StreamReader(client, noBom, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
-                var response = reader.ReadLine();
-                result = int.TryParse(response, out var port) ? port : 0;
-            });
-            return task.Wait(TimeSpan.FromSeconds(2)) ? result : null;
+                try
+                {
+                    int? result = null;
+                    var task = Task.Run(() =>
+                    {
+                        using var client = new System.IO.Pipes.NamedPipeClientStream(".", pipeName, System.IO.Pipes.PipeDirection.InOut);
+                        client.Connect(100);
+                        var noBom = new UTF8Encoding(false);
+                        using var writer = new StreamWriter(client, noBom, leaveOpen: true) { AutoFlush = true };
+                        writer.WriteLine("ping");
+                        writer.Flush();
+                        using var reader = new StreamReader(client, noBom, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+                        var response = reader.ReadLine();
+                        result = int.TryParse(response, out var port) ? port : 0;
+                    });
+                    if (task.Wait(TimeSpan.FromSeconds(2)))
+                        return result;
+                }
+                catch
+                {
+                    // try next candidate
+                }
+            }
+            return null;
         }
         catch
         {
@@ -2182,12 +2204,15 @@ public class WatchServer : IDisposable
             // file cleanup.
             if (!OperatingSystem.IsWindows())
             {
-                try
+                foreach (var pipeName in GetWatchPipeCandidates(_filePath))
                 {
-                    var sockPath = Path.Combine(Path.GetTempPath(), "CoreFxPipe_" + _pipeName);
-                    if (File.Exists(sockPath)) File.Delete(sockPath);
+                    try
+                    {
+                        var sockPath = Path.Combine(Path.GetTempPath(), "CoreFxPipe_" + pipeName);
+                        if (File.Exists(sockPath)) File.Delete(sockPath);
+                    }
+                    catch { /* best-effort cleanup */ }
                 }
-                catch { /* best-effort cleanup */ }
             }
 
             _cts.Dispose();
