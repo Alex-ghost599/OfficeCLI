@@ -467,7 +467,8 @@ OFFICECLI_SKIP_UPDATE=1 officecli ...          # 单次调用跳过检查（CI�
 | `add-part` | 添加新的文档部件（页眉、图表等） |
 | [`open`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-open) | 启动驻留模式（文档保持在内存中） |
 | `close` | 保存并关闭驻留模式 |
-| [`install`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-install) | 安装二进制文件 + 技能文件 + MCP（`all`、`claude`、`cursor` 等） |
+| [`install`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-install) | 仅安装二进制文件 |
+| `setup` | 可选的安装后配置：PATH、skill、MCP、macOS 兼容处理与自动更新 |
 | `config` | 获取或设置配置 |
 | `<format> <command>` | [内置帮助](https://github.com/iOfficeAI/OfficeCLI/wiki/command-reference)（如 `officecli pptx set shape`） |
 

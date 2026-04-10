@@ -480,7 +480,8 @@ OFFICECLI_SKIP_UPDATE=1 officecli ...          # Skip check for one invocation (
 | `add-part` | Add a new document part (header, chart, etc.) |
 | [`open`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-open) | Start resident mode (keep document in memory) |
 | `close` | Save and close resident mode |
-| [`install`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-install) | Install binary + skills + MCP (`all`, `claude`, `cursor`, etc.) |
+| [`install`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-install) | Install the binary only |
+| `setup` | Optional post-install setup for PATH, skills, MCP, macOS compatibility, and auto-update |
 | `config` | Get or set configuration |
 | `<format> <command>` | [Built-in help](https://github.com/iOfficeAI/OfficeCLI/wiki/command-reference) (e.g. `officecli pptx set shape`) |
 
