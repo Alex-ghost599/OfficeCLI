@@ -34,6 +34,18 @@ public class WordRawSetAliasTests : IDisposable
     }
 
     [Fact]
+    public void Word_Raw_DocumentAlias_MatchesCanonicalPath()
+    {
+        _handler.Add("/body", "paragraph", null, new() { ["text"] = "Alias" });
+
+        var rawFromAlias = _handler.Raw("document");
+        var rawFromCanonical = _handler.Raw("/document");
+
+        rawFromAlias.Should().Be(rawFromCanonical);
+        rawFromAlias.Should().Contain("Alias");
+    }
+
+    [Fact]
     public void Word_RawSet_StylesAlias_AppliesMutation()
     {
         _handler.RawSet("styles", "//w:docDefaults/w:pPrDefault/w:pPr/w:autoSpaceDE", "setattr", "w:val=true");
@@ -41,5 +53,15 @@ public class WordRawSetAliasTests : IDisposable
         var raw = _handler.Raw("/styles");
         raw.Should().Contain("autoSpaceDE");
         raw.Should().Contain("w:val=\"true\"");
+    }
+
+    [Fact]
+    public void Word_Raw_StylesAlias_MatchesCanonicalPath()
+    {
+        var rawFromAlias = _handler.Raw("styles");
+        var rawFromCanonical = _handler.Raw("/styles");
+
+        rawFromAlias.Should().Be(rawFromCanonical);
+        rawFromAlias.Should().Contain("styles");
     }
 }
