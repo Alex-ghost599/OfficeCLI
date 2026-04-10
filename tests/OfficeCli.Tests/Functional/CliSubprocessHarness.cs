@@ -11,10 +11,12 @@ internal sealed class CliSubprocessHarness : IDisposable
     private readonly string _homeDir;
     private readonly string _tmpDir;
 
-    public CliSubprocessHarness()
+    public CliSubprocessHarness(bool useLongTmpLayout = false)
     {
         var shortId = Guid.NewGuid().ToString("N")[..8];
-        _workspaceRoot = Path.Combine("/tmp", $"ocli-{shortId}");
+        _workspaceRoot = useLongTmpLayout
+            ? Path.Combine("/private/tmp", $"officecli-watch-longtmp-regression-{shortId}", "workspace-root")
+            : Path.Combine("/tmp", $"ocli-{shortId}");
         _homeDir = Path.Combine(_workspaceRoot, "home");
         _tmpDir = Path.Combine(_workspaceRoot, "tmp");
 
