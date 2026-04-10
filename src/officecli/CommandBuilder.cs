@@ -71,8 +71,8 @@ static partial class CommandBuilder
                 Arguments = $"__resident-serve__ \"{filePath}\"",
                 UseShellExecute = false,
                 CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
+                RedirectStandardOutput = false,
+                RedirectStandardError = false
             };
 
             var process = Process.Start(startInfo);
@@ -91,7 +91,7 @@ static partial class CommandBuilder
             if (startedProbe.State == ResidentProbeState.Failed)
                 throw new InvalidOperationException($"Resident process exited. {startedProbe.Error}".Trim());
 
-            throw new InvalidOperationException($"Resident process started but did not become ready within {ResidentStartupTimeout.TotalSeconds:0} seconds.");
+            throw new InvalidOperationException($"Resident process started but did not become ready within {ResidentStartupTimeout.TotalSeconds:0} seconds. {startedProbe.Error}".Trim());
         }, json); });
 
         rootCommand.Add(openCommand);
@@ -202,7 +202,7 @@ static partial class CommandBuilder
         return response.ExitCode;
     }
 
-    private static ResidentProbeResult WaitForResidentReady(string filePath, Process? process, TimeSpan timeout)
+    private static ResidentProbeResult WaitForResidentReady(string filePath, Process? process, TimeSpan timeout, Func<string>? getStderr = null)
     {
         var stopwatch = Stopwatch.StartNew();
         var lastProbe = ResidentClient.Probe(filePath);
@@ -214,7 +214,7 @@ static partial class CommandBuilder
 
             if (process != null && process.HasExited)
             {
-                var stderr = process.StandardError.ReadToEnd().Trim();
+                var stderr = (getStderr?.Invoke() ?? "").Trim();
                 return new ResidentProbeResult
                 {
                     PipeName = lastProbe.PipeName,
@@ -229,12 +229,39 @@ static partial class CommandBuilder
 
         if (process != null && process.HasExited)
         {
-            var stderr = process.StandardError.ReadToEnd().Trim();
+            var stderr = (getStderr?.Invoke() ?? "").Trim();
             return new ResidentProbeResult
             {
                 PipeName = lastProbe.PipeName,
                 State = ResidentProbeState.Failed,
                 Error = string.IsNullOrEmpty(stderr) ? "Resident process exited during startup." : stderr
+            };
+        }
+
+        if (process != null && !process.HasExited)
+        {
+            var stderr = (getStderr?.Invoke() ?? "").Trim();
+            return lastProbe.State switch
+            {
+                ResidentProbeState.NotRunning => new ResidentProbeResult
+                {
+                    PipeName = lastProbe.PipeName,
+                    State = ResidentProbeState.Starting,
+                    Error = JoinResidentStartupDetails(
+                        "Resident process is still alive, but its ping pipe never became reachable.",
+                        stderr,
+                        lastProbe.Error)
+                },
+                ResidentProbeState.Starting => new ResidentProbeResult
+                {
+                    PipeName = lastProbe.PipeName,
+                    State = ResidentProbeState.Starting,
+                    Error = JoinResidentStartupDetails(
+                        "Resident ping pipe is reachable, but startup never completed.",
+                        stderr,
+                        lastProbe.Error)
+                },
+                _ => lastProbe
             };
         }
 
@@ -256,6 +283,10 @@ static partial class CommandBuilder
         return ResidentClient.Probe(filePath).State == ResidentProbeState.NotRunning;
     }
 
+    private static string JoinResidentStartupDetails(params string?[] parts)
+    {
+        return string.Join(" ", parts.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p!.Trim()));
+    }
 
     internal static int SafeRun(Func<int> action, bool json = false)
     {

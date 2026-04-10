@@ -26,39 +26,55 @@ public static class ResidentClient
     public static ResidentProbeResult Probe(string filePath)
     {
         var pipeName = ResidentServer.GetPipeName(filePath);
-        try
+        string? lastError = null;
+
+        foreach (var pingPipeName in ResidentServer.GetPingPipeCandidates(filePath))
         {
-            using var client = new NamedPipeClientStream(".", pipeName + "-ping", PipeDirection.InOut);
-            client.Connect(100);
-
-            var pingRequest = new ResidentRequest { Command = "__ping__" };
-            var json = System.Text.Json.JsonSerializer.Serialize(pingRequest, ResidentJsonContext.Default.ResidentRequest);
-            PipeWriteLine(client, json);
-
-            var responseLine = PipeReadLine(client);
-            if (responseLine == null)
-                return new ResidentProbeResult { PipeName = pipeName, State = ResidentProbeState.NotRunning };
-
-            var response = System.Text.Json.JsonSerializer.Deserialize<ResidentResponse>(responseLine, ResidentJsonContext.Default.ResidentResponse);
-            if (response == null || string.IsNullOrEmpty(response.Stdout))
-                return new ResidentProbeResult { PipeName = pipeName, State = ResidentProbeState.NotRunning };
-
-            var residentFilePath = Path.GetFullPath(response.Stdout);
-            var requestedFilePath = Path.GetFullPath(filePath);
-            if (!string.Equals(residentFilePath, requestedFilePath, StringComparison.OrdinalIgnoreCase))
-                return new ResidentProbeResult { PipeName = pipeName, State = ResidentProbeState.NotRunning };
-
-            return new ResidentProbeResult
+            try
             {
-                PipeName = pipeName,
-                State = ParseProbeState(response.State),
-                Error = response.Stderr
-            };
+                using var client = new NamedPipeClientStream(".", pingPipeName, PipeDirection.InOut);
+                client.Connect(100);
+
+                var pingRequest = new ResidentRequest { Command = "__ping__" };
+                var json = System.Text.Json.JsonSerializer.Serialize(pingRequest, ResidentJsonContext.Default.ResidentRequest);
+                PipeWriteLine(client, json);
+
+                var responseLine = PipeReadLine(client);
+                if (responseLine == null)
+                {
+                    lastError = "Resident ping pipe returned no response.";
+                    continue;
+                }
+
+                var response = System.Text.Json.JsonSerializer.Deserialize<ResidentResponse>(responseLine, ResidentJsonContext.Default.ResidentResponse);
+                if (response == null || string.IsNullOrEmpty(response.Stdout))
+                {
+                    lastError = "Resident ping pipe returned an invalid response.";
+                    continue;
+                }
+
+                var residentFilePath = Path.GetFullPath(response.Stdout);
+                var requestedFilePath = Path.GetFullPath(filePath);
+                if (!string.Equals(residentFilePath, requestedFilePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    lastError = "Resident ping pipe belongs to a different file.";
+                    continue;
+                }
+
+                return new ResidentProbeResult
+                {
+                    PipeName = pipeName,
+                    State = ParseProbeState(response.State),
+                    Error = response.Stderr
+                };
+            }
+            catch (Exception ex)
+            {
+                lastError = ex.Message;
+            }
         }
-        catch
-        {
-            return new ResidentProbeResult { PipeName = pipeName, State = ResidentProbeState.NotRunning };
-        }
+
+        return new ResidentProbeResult { PipeName = pipeName, State = ResidentProbeState.NotRunning, Error = lastError ?? "" };
     }
 
     /// <summary>
@@ -109,34 +125,35 @@ public static class ResidentClient
     /// </summary>
     public static bool SendClose(string filePath, int maxRetries = 2)
     {
-        // Send close via the dedicated ping pipe (always responsive)
-        var pipeName = ResidentServer.GetPipeName(filePath) + "-ping";
-        for (int attempt = 0; attempt <= maxRetries; attempt++)
+        foreach (var pipeName in ResidentServer.GetPingPipeCandidates(filePath))
         {
-            try
+            for (int attempt = 0; attempt <= maxRetries; attempt++)
             {
-                using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
-                client.Connect(1000);
+                try
+                {
+                    using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
+                    client.Connect(1000);
 
-                var request = new ResidentRequest { Command = "__close__" };
-                var json = System.Text.Json.JsonSerializer.Serialize(request, ResidentJsonContext.Default.ResidentRequest);
-                PipeWriteLine(client, json);
+                    var request = new ResidentRequest { Command = "__close__" };
+                    var json = System.Text.Json.JsonSerializer.Serialize(request, ResidentJsonContext.Default.ResidentRequest);
+                    PipeWriteLine(client, json);
 
-                var responseLine = PipeReadLine(client);
-                if (responseLine == null)
-                    continue;
+                    var responseLine = PipeReadLine(client);
+                    if (responseLine == null)
+                        continue;
 
-                var response = System.Text.Json.JsonSerializer.Deserialize<ResidentResponse>(responseLine, ResidentJsonContext.Default.ResidentResponse);
-                if (response != null && response.ExitCode == 0)
-                    return true;
+                    var response = System.Text.Json.JsonSerializer.Deserialize<ResidentResponse>(responseLine, ResidentJsonContext.Default.ResidentResponse);
+                    if (response != null && response.ExitCode == 0)
+                        return true;
+                }
+                catch
+                {
+                    if (attempt == maxRetries)
+                        break;
+                }
+
+                Thread.Sleep(50 * (attempt + 1));
             }
-            catch
-            {
-                if (attempt == maxRetries)
-                    return false;
-            }
-
-            Thread.Sleep(50 * (attempt + 1));
         }
 
         return false;
