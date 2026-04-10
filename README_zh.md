@@ -217,9 +217,12 @@ irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex
 
 ```bash
 officecli install
+officecli setup   # 可选：PATH / skill / MCP / macOS 兼容处理 / 自动更新
 ```
 
-OfficeCLI 会在后台自动检查更新。通过 `officecli config autoUpdate false` 关闭，或通过 `OFFICECLI_SKIP_UPDATE=1` 跳过单次检查。配置文件位于 `~/.officecli/config.json`。
+`install` 只负责安装二进制，不会默认修改环境或安装任何 agent 集成。
+
+OfficeCLI 默认**关闭**后台自动更新检查。你可以通过 `officecli config autoUpdate true` 显式开启，或在 `officecli setup` 中选择启用。配置文件位于 `~/.officecli/config.json`。
 
 ## 核心功能
 
@@ -299,12 +302,12 @@ officecli mcp list         # 查看注册状态
 两步将 OfficeCLI 集成到任何 AI 智能体：
 
 1. **安装二进制文件** -- 一条命令（见[安装](#安装)）
-2. **完成。** OfficeCLI 自动检测您的 AI 工具（Claude Code、GitHub Copilot、Codex），通过检查已知配置目录并安装技能文件。您的智能体可以立即创建、读取和修改任何 Office 文档。
+2. **可选：** 运行 `officecli setup`，按需选择是否修改 PATH、安装 skill、注册 MCP、执行 macOS 兼容处理或启用自动更新。
 
 <details>
 <summary><strong>手动配置（可选）</strong></summary>
 
-如果自动安装未覆盖您的环境，可以手动安装技能文件：
+如果您跳过了 `officecli setup`，仍然可以手动安装技能文件：
 
 **直接将 SKILL.md 提供给智能体：**
 
@@ -348,7 +351,7 @@ cli('set', 'deck.pptx', '/slide[1]/shape[1]', '--prop', 'text=Hello')
 - **渐进式复杂度** -- 从 L1（读取）开始，升级到 L2（修改），仅在必要时回退到 L3（原始 XML）。最大限度减少 token 消耗。
 - **自愈式工作流** -- `validate`、`view issues` 和帮助系统让智能体无需人工干预即可检测问题并自行修正。
 - **内置帮助** -- 属性名或取值格式不确定时，运行 `officecli <format> set <element>` 即可查询，无需猜测。
-- **自动安装** -- 无需手动配置技能文件。OfficeCLI 自动检测您的 AI 工具并完成配置。
+- **显式 opt-in 配置** -- 默认安装不做环境变更。需要 PATH、agent skill、MCP 或自动更新时，再运行 `officecli setup`。
 
 ### 内置帮助
 
