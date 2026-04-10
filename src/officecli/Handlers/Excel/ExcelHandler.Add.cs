@@ -2325,14 +2325,7 @@ public partial class ExcelHandler
                 var chartPart = drawingsPart.AddNewPart<ChartPart>();
                 var relId = drawingsPart.GetIdOfPart(chartPart);
 
-                // Initialize with minimal valid ChartSpace
-                chartPart.ChartSpace = new DocumentFormat.OpenXml.Drawing.Charts.ChartSpace(
-                    new DocumentFormat.OpenXml.Drawing.Charts.Chart(
-                        new DocumentFormat.OpenXml.Drawing.Charts.PlotArea(
-                            new DocumentFormat.OpenXml.Drawing.Charts.Layout()
-                        )
-                    )
-                );
+                chartPart.ChartSpace = ChartHelper.BuildPlaceholderChartSpace();
                 chartPart.ChartSpace.Save();
 
                 var chartIdx = drawingsPart.ChartParts.ToList().IndexOf(chartPart);
