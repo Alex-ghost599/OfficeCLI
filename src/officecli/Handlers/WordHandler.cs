@@ -41,17 +41,18 @@ public partial class WordHandler : IDocumentHandler
     {
         var mainPart = _doc.MainDocumentPart;
         if (mainPart == null) return "(no main part)";
+        var normalizedPartPath = NormalizeWordRawPartPath(partPath);
 
-        return partPath.ToLowerInvariant() switch
+        return normalizedPartPath.ToLowerInvariant() switch
         {
             "/document" or "/word/document.xml" => mainPart.Document?.OuterXml ?? "",
             "/styles" or "/word/styles.xml" => mainPart.StyleDefinitionsPart?.Styles?.OuterXml ?? "(no styles)",
             "/settings" or "/word/settings.xml" => mainPart.DocumentSettingsPart?.Settings?.OuterXml ?? "(no settings)",
             "/numbering" or "/word/numbering.xml" => mainPart.NumberingDefinitionsPart?.Numbering?.OuterXml ?? "(no numbering)",
             "/comments" => mainPart.WordprocessingCommentsPart?.Comments?.OuterXml ?? "(no comments)",
-            _ when partPath.StartsWith("/header") => GetHeaderRawXml(partPath),
-            _ when partPath.StartsWith("/footer") => GetFooterRawXml(partPath),
-            _ when partPath.StartsWith("/chart") => GetChartRawXml(partPath),
+            _ when normalizedPartPath.StartsWith("/header", StringComparison.OrdinalIgnoreCase) => GetHeaderRawXml(normalizedPartPath),
+            _ when normalizedPartPath.StartsWith("/footer", StringComparison.OrdinalIgnoreCase) => GetFooterRawXml(normalizedPartPath),
+            _ when normalizedPartPath.StartsWith("/chart", StringComparison.OrdinalIgnoreCase) => GetChartRawXml(normalizedPartPath),
             _ => throw new ArgumentException($"Unknown part: {partPath}. Available: /document, /styles, /settings, /numbering, /header[n], /footer[n], /chart[n]")
         };
     }
