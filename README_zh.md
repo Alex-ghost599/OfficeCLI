@@ -565,6 +565,16 @@ officecli validate report.docx && officecli view report.docx issues --json
 ./build.sh
 ```
 
+## Round3 手工审计脚本
+
+如果要在隔离环境里重跑完整的 Round3 手工功能审计，可直接运行：
+
+```bash
+python3 scripts/manual_round3_audit.py
+```
+
+这个脚本继续使用显式 `officecli` 子进程调用来驱动真实文档操作，默认创建隔离的 `HOME/TMPDIR`，并把日志与报告写到 repo 外部的审计工作区。只要出现任何 `部分通过` 或 `失败`，脚本就会返回非零退出码。
+
 ## 许可证
 
 [Apache License 2.0](LICENSE)

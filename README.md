@@ -578,6 +578,16 @@ Requires [.NET 10 SDK](https://dotnet.microsoft.com/download) for compilation on
 ./build.sh
 ```
 
+## Manual Round3 Audit
+
+For a repo-local, reusable version of the full isolated manual functional audit workflow, run:
+
+```bash
+python3 scripts/manual_round3_audit.py
+```
+
+The script keeps the original audit model based on explicit `officecli` subprocess calls, creates an isolated `HOME/TMPDIR`, writes logs and reports into a repo-external workspace by default, and returns a non-zero exit code if any audit item is `部分通过` or `失败`.
+
 ## License
 
 [Apache License 2.0](LICENSE)
