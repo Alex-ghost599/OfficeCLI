@@ -217,9 +217,12 @@ irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex
 
 ```bash
 officecli install
+officecli setup   # 任意: PATH / skill / MCP / macOS 互換対応 / 自動更新
 ```
 
-更新はバックグラウンドで自動チェックされます。`officecli config autoUpdate false` で無効化、または `OFFICECLI_SKIP_UPDATE=1` で単回スキップ可能。設定は `~/.officecli/config.json` にあります。
+`install` はバイナリを配置するだけで、環境やエージェント設定は変更しません。
+
+自動更新チェックはデフォルトで**無効**です。`officecli config autoUpdate true` で明示的に有効化するか、`officecli setup` で有効化を選択してください。設定は `~/.officecli/config.json` に保存されます。
 
 ## 主な機能
 
@@ -299,12 +302,12 @@ JSON-RPC で全ドキュメント操作を公開 — シェルアクセス不要
 2ステップで OfficeCLI を任意の AI エージェントに統合：
 
 1. **バイナリをインストール** -- コマンド一つ（[インストール](#インストール)参照）
-2. **完了。** OfficeCLI は AI ツール（Claude Code、GitHub Copilot、Codex）を自動検出し、既知の設定ディレクトリを確認してスキルファイルをインストールします。エージェントはすぐに Office 文書の作成・読み取り・変更が可能です。
+2. **任意：** `officecli setup` を実行し、PATH 変更、skill のインストール、MCP 登録、macOS 互換対応、自動更新の有効化を必要に応じて選択します。
 
 <details>
 <summary><strong>手動設定（オプション）</strong></summary>
 
-自動インストールがお使いの環境に対応していない場合、手動でスキルファイルをインストールできます：
+`officecli setup` をスキップした場合でも、手動でスキルファイルをインストールできます：
 
 **SKILL.md を直接エージェントに読み込ませる：**
 
@@ -348,7 +351,7 @@ cli('set', 'deck.pptx', '/slide[1]/shape[1]', '--prop', 'text=Hello')
 - **段階的な複雑さ** -- L1（読み取り）から始め、L2（変更）にエスカレート、必要な時だけ L3（生 XML）にフォールバック。トークン消費を最小化。
 - **自己修復ワークフロー** -- `validate`、`view issues`、ヘルプシステムにより、エージェントは人間の介入なしに問題を検出・自己修正可能。
 - **組み込みヘルプ** -- プロパティ名や値の形式が不明な場合、`officecli <format> set <element>` を実行して確認。推測不要。
-- **自動インストール** -- スキルファイルの手動設定不要。OfficeCLI が AI ツールを自動検出して設定を完了。
+- **明示的な opt-in 設定** -- デフォルトのインストールは副作用なし。PATH、skill、MCP、自動更新が必要な場合のみ `officecli setup` を実行。
 
 ### 組み込みヘルプ
 
@@ -437,6 +440,7 @@ officecli get report.docx /body --depth 1 --json
 ## 更新と設定
 
 ```bash
+officecli config autoUpdate true               # 自動更新チェックを有効化
 officecli config autoUpdate false              # 自動更新チェックを無効化
 OFFICECLI_SKIP_UPDATE=1 officecli ...          # 単回のチェックをスキップ（CI 向け）
 ```
@@ -464,7 +468,8 @@ OFFICECLI_SKIP_UPDATE=1 officecli ...          # 単回のチェックをスキ�
 | `add-part` | 新しいドキュメントパート（ヘッダー、チャートなど）を追加 |
 | [`open`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-open) | レジデントモードを開始（ドキュメントをメモリに保持） |
 | `close` | 保存してレジデントモードを終了 |
-| [`install`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-install) | バイナリ + スキル + MCP をインストール（`all`、`claude`、`cursor` など） |
+| [`install`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-install) | バイナリのみをインストール |
+| `setup` | インストール後の任意設定（PATH、skill、MCP、macOS 互換対応、自動更新） |
 | `config` | 設定の取得または変更 |
 | `<format> <command>` | [組み込みヘルプ](https://github.com/iOfficeAI/OfficeCLI/wiki/command-reference)（例：`officecli pptx set shape`） |
 
