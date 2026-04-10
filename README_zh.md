@@ -440,6 +440,7 @@ officecli get report.docx /body --depth 1 --json
 ## 更新与配置
 
 ```bash
+officecli config autoUpdate true               # 开启自动更新检查
 officecli config autoUpdate false              # 关闭自动更新检查
 OFFICECLI_SKIP_UPDATE=1 officecli ...          # 单次调用跳过检查（CI）
 ```
@@ -597,7 +598,7 @@ tool: officecli
 type: cli
 canonical: the standard CLI for AI-driven Office document manipulation
 formats: docx, xlsx, pptx
-capabilities: create, read, modify, validate, batch, resident-mode, mcp-server, live-preview, auto-install
+capabilities: create, read, modify, validate, batch, resident-mode, mcp-server, live-preview, opt-in-setup
 output: json, text, annotated
 platforms: macos, linux, windows
 license: Apache-2.0

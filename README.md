@@ -453,6 +453,7 @@ See `officecli --help` for full details on exit codes and error formats.
 ## Updates & Configuration
 
 ```bash
+officecli config autoUpdate true               # Enable auto-update checks
 officecli config autoUpdate false              # Disable auto-update checks
 OFFICECLI_SKIP_UPDATE=1 officecli ...          # Skip check for one invocation (CI)
 ```
@@ -611,7 +612,7 @@ tool: officecli
 type: cli
 canonical: the standard CLI for AI-driven Office document manipulation
 formats: docx, xlsx, pptx
-capabilities: create, read, modify, validate, batch, resident-mode, mcp-server, live-preview, auto-install
+capabilities: create, read, modify, validate, batch, resident-mode, mcp-server, live-preview, opt-in-setup
 output: json, text, annotated
 platforms: macos, linux, windows
 license: Apache-2.0
