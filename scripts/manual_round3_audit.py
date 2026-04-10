@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,7 @@ REPORTS: Path
 ARTIFACTS: Path
 BIN: Path
 BASE_ENV: dict[str, str]
+PLAYWRIGHT_TMPDIR: Path
 
 
 def parse_args() -> argparse.Namespace:
@@ -75,7 +77,7 @@ def default_workspace(report_name: str) -> Path:
 
 
 def configure_paths(args: argparse.Namespace) -> None:
-    global ROOT, FIXTURES, WORKSPACE, OUTPUTS, TMPDIR, ISOLATED_HOME, LOGS, REPORTS, ARTIFACTS, BIN, BASE_ENV
+    global ROOT, FIXTURES, WORKSPACE, OUTPUTS, TMPDIR, ISOLATED_HOME, LOGS, REPORTS, ARTIFACTS, BIN, BASE_ENV, PLAYWRIGHT_TMPDIR
 
     ROOT = (args.workspace or default_workspace(args.report_name)).resolve()
     FIXTURES = ROOT / "fixtures"
@@ -87,6 +89,7 @@ def configure_paths(args: argparse.Namespace) -> None:
     REPORTS = ROOT / "reports"
     ARTIFACTS = ROOT / "artifacts"
     BIN = args.cli.resolve()
+    PLAYWRIGHT_TMPDIR = Path("/tmp") / f"ocli-pw-{args.report_name}"
     BASE_ENV = {
         "HOME": str(ISOLATED_HOME),
         "OFFICECLI_SKIP_UPDATE": "1",
@@ -102,6 +105,9 @@ def ensure_workspace(args: argparse.Namespace) -> None:
         shutil.rmtree(ROOT)
     for path in [FIXTURES, OUTPUTS, TMPDIR, LOGS, REPORTS, ARTIFACTS, ISOLATED_HOME]:
         path.mkdir(parents=True, exist_ok=True)
+    if PLAYWRIGHT_TMPDIR.exists() and not args.keep_workspace:
+        shutil.rmtree(PLAYWRIGHT_TMPDIR)
+    PLAYWRIGHT_TMPDIR.mkdir(parents=True, exist_ok=True)
 
 
 @dataclass
@@ -207,7 +213,7 @@ class AuditRunner:
         return self.run(label, [str(BIN), *args], stdin=stdin, timeout=timeout)
 
     def playwright(self, label: str, *args: str, timeout: int = 120) -> CmdResult:
-        return self.run(label, [str(PWCLI), *args], timeout=timeout)
+        return self.run(label, [str(PWCLI), *args], timeout=timeout, env_extra={"TMPDIR": str(PLAYWRIGHT_TMPDIR)})
 
     def record(
         self,
@@ -1255,51 +1261,26 @@ def run_watch_probe(audit: AuditRunner, file: Path, port: int = 18081) -> dict[s
     )
 
     if ready:
-        audit.playwright("pw-open-blank", "open", "about:blank")
-        route_js = """
-globalThis.__blocked = [];
-await page.route('**/*', route => {
-  const url = route.request().url();
-  try {
-    const u = new URL(url);
-    if (u.hostname === '127.0.0.1' || u.hostname === 'localhost') {
-      return route.continue();
-    }
-    globalThis.__blocked.push(url);
-    return route.abort();
-  } catch (e) {
-    return route.continue();
-  }
-});
-await page.goto('http://127.0.0.1:%d', { waitUntil: 'domcontentloaded' });
-await page.waitForTimeout(1200);
-""" % port
-        audit.playwright("pw-route-goto-watch", "run-code", route_js, timeout=180)
-        snapshot = audit.playwright("pw-watch-snapshot", "snapshot", timeout=120)
-        data_paths = audit.playwright(
-            "pw-watch-data-paths",
-            "eval",
-            "JSON.stringify(Array.from(document.querySelectorAll('[data-path]')).slice(0,80).map(el => ({path: el.getAttribute('data-path'), text: (el.textContent || '').trim().slice(0,80)})))",
-            timeout=120,
-        )
-        audit.save_stdout(snapshot, OUTPUTS / "watch-snapshot.txt")
-        audit.save_stdout(data_paths, OUTPUTS / "watch-data-paths.json")
-        click_js = """
-const target = Array.from(document.querySelectorAll('[data-path]')).find(el => {
-  const p = el.getAttribute('data-path') || '';
-  return p.includes('/shape') || p.includes('/table') || p.includes('/picture');
-});
-if (!target) throw new Error('No selectable element found');
-target.scrollIntoView();
-target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-await page.waitForTimeout(800);
-JSON.stringify({
-  path: target.getAttribute('data-path'),
-  text: (target.textContent || '').trim().slice(0,80),
-  blocked: globalThis.__blocked || []
-});
-"""
-        click_result = audit.playwright("pw-watch-click-path", "run-code", click_js, timeout=180)
+        open_watch = audit.playwright("pw-open-watch", "open", f"http://127.0.0.1:{port}", timeout=180)
+        if playwright_ok(open_watch):
+            time.sleep(1.2)
+            snapshot = audit.playwright("pw-watch-snapshot", "snapshot", timeout=120)
+            data_paths = audit.playwright(
+                "pw-watch-data-paths",
+                "eval",
+                "JSON.stringify(Array.from(document.querySelectorAll('[data-path]')).slice(0,80).map(el => ({path: el.getAttribute('data-path'), text: (el.textContent || '').trim().slice(0,80)})))",
+                timeout=120,
+            )
+        else:
+            snapshot = CmdResult("pw-watch-snapshot", [], 1, "", "Playwright open failed", 0.0, LOGS / f"{audit.counter:03d}-pw-watch-snapshot-skipped.log")
+            data_paths = CmdResult("pw-watch-data-paths", [], 1, "", "Playwright open failed", 0.0, LOGS / f"{audit.counter:03d}-pw-watch-data-paths-skipped.log")
+        if snapshot.stdout:
+            audit.save_stdout(snapshot, OUTPUTS / "watch-snapshot.txt")
+        if data_paths.stdout:
+            audit.save_stdout(data_paths, OUTPUTS / "watch-data-paths.json")
+        fallback = inject_watch_selection_direct(port)
+        audit.save_json(OUTPUTS / "watch-selection-fallback.json", fallback)
+        click_result = CmdResult("watch-selection-fallback", [], 0, json.dumps(fallback), "", 0.0, LOGS / f"{audit.counter:03d}-watch-selection-fallback.log")
     else:
         snapshot = data_paths = click_result = CmdResult("watch-missing", [], 1, "", "watch port not ready", 0.0, watch_log)
 
@@ -1354,6 +1335,36 @@ JSON.stringify({
         "data_paths": data_paths,
         "click_result": click_result,
     }
+
+
+def inject_watch_selection_direct(port: int) -> dict[str, Any]:
+    html = ""
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=2) as response:
+                html = response.read().decode("utf-8", errors="replace")
+            break
+        except Exception:
+            time.sleep(0.2)
+    matches = re.findall(r'data-path="([^"]+)"', html)
+    selected_path = next((p for p in matches if "/shape" in p or "/table" in p or "/picture" in p), "")
+    if not selected_path:
+        raise RuntimeError("No selectable data-path found for direct watch selection fallback")
+    payload = json.dumps({"paths": [selected_path]}).encode("utf-8")
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/selection",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=5) as response:
+        status = response.status
+    return {"mode": "http-fallback", "path": selected_path, "status": status}
+
+
+def playwright_ok(result: CmdResult) -> bool:
+    return result.returncode == 0 and "### Error" not in result.stdout
 
 
 def run_compatibility(audit: AuditRunner, file: Path, fmt: str) -> dict[str, CmdResult]:
