@@ -268,6 +268,20 @@ static partial class CommandBuilder
         return lastProbe;
     }
 
+    private static void AttachProcessOutput(Process process, StringBuilder stdoutSink, StringBuilder stderrSink)
+    {
+        process.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data != null) stdoutSink.AppendLine(e.Data);
+        };
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data != null) stderrSink.AppendLine(e.Data);
+        };
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+    }
+
     private static bool WaitForResidentStop(string filePath, TimeSpan timeout)
     {
         var stopwatch = Stopwatch.StartNew();
