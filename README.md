@@ -78,7 +78,7 @@ That's it. The skill file teaches the agent how to install the binary and use al
 officecli install
 ```
 
-This copies the binary to your PATH and installs the **officecli skill** into every AI coding agent it detects — Claude Code, Cursor, Windsurf, GitHub Copilot, and more. Your agent can immediately create, read, and edit Office documents on your behalf, no extra configuration needed.
+This installs the binary only. After that, run `officecli setup` if you want to opt into PATH updates, agent skill installation, MCP registration, macOS compatibility tweaks, or automatic update checks.
 
 ## For Developers — See It Live in 30 Seconds
 
@@ -86,6 +86,9 @@ This copies the binary to your PATH and installs the **officecli skill** into ev
 # 1. Install (macOS / Linux)
 curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | bash
 # Windows (PowerShell): irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex
+
+# 1b. Optional post-install setup
+officecli setup
 
 # 2. Create a blank PowerPoint
 officecli create deck.pptx
@@ -223,9 +226,12 @@ Verify installation: `officecli --version`
 
 ```bash
 officecli install
+officecli setup   # optional: PATH / skills / MCP / macOS compatibility / auto-update
 ```
 
-Updates are checked automatically in the background. Disable with `officecli config autoUpdate false` or skip per-invocation with `OFFICECLI_SKIP_UPDATE=1`. Configuration lives under `~/.officecli/config.json`.
+`install` only copies the binary. `setup` is interactive and every optional change defaults to **No**.
+
+Automatic update checks are **disabled by default**. Enable them explicitly with `officecli config autoUpdate true` or by choosing Yes in `officecli setup`. Configuration lives under `~/.officecli/config.json`.
 
 ## Key Features
 
@@ -311,12 +317,12 @@ Exposes all document operations as tools over JSON-RPC — no shell access neede
 Get OfficeCLI working with your AI agent in two steps:
 
 1. **Install the binary** -- one command (see [Installation](#installation))
-2. **Done.** OfficeCLI automatically detects your AI tools (Claude Code, GitHub Copilot, Codex) by checking known config directories and installs its skill file. Your agent can immediately create, read, and modify any Office document.
+2. **Optional:** Run `officecli setup` and opt into PATH changes, skill installation, MCP registration, macOS compatibility tweaks, or automatic update checks.
 
 <details>
 <summary><strong>Manual setup (optional)</strong></summary>
 
-If auto-install doesn't cover your setup, you can install the skill file manually:
+If you skip `officecli setup`, you can still install the skill file manually:
 
 **Feed SKILL.md to your agent directly:**
 
@@ -360,7 +366,7 @@ Every command supports `--json` for structured output. Path-based addressing mea
 - **Progressive complexity** -- Start with L1 (read), escalate to L2 (modify), fall back to L3 (raw XML) only when needed. Minimizes token usage.
 - **Self-healing workflow** -- `validate`, `view issues`, and the help system let agents detect problems and self-correct without human intervention.
 - **Built-in help** -- When unsure about property names or value formats, run `officecli <format> set <element>` instead of guessing.
-- **Auto-install** -- No manual skill-file setup. OfficeCLI detects your AI tools and configures itself automatically.
+- **Opt-in setup** -- Installation stays side-effect free by default. Use `officecli setup` when you explicitly want PATH changes, agent skills, MCP registration, or auto-update.
 
 ### Built-in Help
 

@@ -11,10 +11,11 @@ using System.Text.RegularExpressions;
 namespace OfficeCli.Core;
 
 /// <summary>
-/// Daily auto-update against GitHub releases.
+/// Opt-in background update checks against GitHub releases.
 /// - Config stored in ~/.officecli/config.json
 /// - Checks at most once per day
-/// - Zero performance impact: spawns background process to check and upgrade
+/// - Disabled by default until the user enables autoUpdate
+/// - Zero performance impact when enabled: spawns background process to check and upgrade
 /// - Silently skips if config dir is not writable
 ///
 /// Also handles the __update-check__ internal command (called by the spawned background process).
@@ -50,8 +51,7 @@ internal static class UpdateChecker
         if (!config.AutoUpdate) return;
 
         // If stale, spawn a background process to refresh (fire and forget)
-        if (!config.LastUpdateCheck.HasValue ||
-            (DateTime.UtcNow - config.LastUpdateCheck.Value).TotalHours >= CheckIntervalHours)
+        if (ShouldCheckInBackground(config, DateTime.UtcNow))
         {
             // Update timestamp immediately to prevent concurrent spawns
             config.LastUpdateCheck = DateTime.UtcNow;
@@ -376,6 +376,21 @@ internal static class UpdateChecker
         catch { return new AppConfig(); }
     }
 
+    internal static bool ShouldCheckInBackground(AppConfig config, DateTime utcNow)
+    {
+        if (!config.AutoUpdate) return false;
+        return !config.LastUpdateCheck.HasValue ||
+               (utcNow - config.LastUpdateCheck.Value).TotalHours >= CheckIntervalHours;
+    }
+
+    internal static void SetAutoUpdate(bool enabled)
+    {
+        Directory.CreateDirectory(ConfigDir);
+        var config = LoadConfig();
+        config.AutoUpdate = enabled;
+        SaveConfig(config);
+    }
+
     private static void SaveConfig(AppConfig config)
     {
         var json = JsonSerializer.Serialize(config, AppConfigContext.Default.AppConfig);
@@ -387,7 +402,7 @@ internal class AppConfig
 {
     public DateTime? LastUpdateCheck { get; set; }
     public string? LatestVersion { get; set; }
-    public bool AutoUpdate { get; set; } = true;
+    public bool AutoUpdate { get; set; }
     public bool Log { get; set; }
 }
 

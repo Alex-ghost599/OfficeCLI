@@ -122,61 +122,24 @@ mkdir -p "$INSTALL_DIR"
 cp "$SOURCE" "$INSTALL_DIR/$BINARY_NAME"
 chmod +x "$INSTALL_DIR/$BINARY_NAME"
 
-# macOS: remove quarantine flag and ad-hoc codesign (required by AppleSystemPolicy)
-if [ "$(uname -s)" = "Darwin" ]; then
-    xattr -d com.apple.quarantine "$INSTALL_DIR/$BINARY_NAME" 2>/dev/null || true
-    codesign -s - -f "$INSTALL_DIR/$BINARY_NAME" 2>/dev/null || true
-fi
-
-# Auto-add to PATH if needed
-case ":$PATH:" in
-    *":$INSTALL_DIR:"*) ;;
-    *)
-        PATH_LINE="export PATH=\"$INSTALL_DIR:\$PATH\""
-        if [ "$(uname -s)" = "Darwin" ]; then
-            SHELL_RC="$HOME/.zshrc"
-        elif [ -n "$ZSH_VERSION" ]; then
-            SHELL_RC="$HOME/.zshrc"
-        else
-            SHELL_RC="$HOME/.bashrc"
-        fi
-        if ! grep -qF "$INSTALL_DIR" "$SHELL_RC" 2>/dev/null; then
-            echo "" >> "$SHELL_RC"
-            echo "$PATH_LINE" >> "$SHELL_RC"
-            echo "Added $INSTALL_DIR to PATH in $SHELL_RC"
-            echo "Run 'source $SHELL_RC' or restart your terminal to apply."
-        fi
-        ;;
-esac
-
 rm -f "/tmp/$BINARY_NAME"
 
-# Step 4: Install AI agent skills (first install only)
-SKILL_MARKER="$INSTALL_DIR/.officecli-skills-installed"
-if [ ! -f "$SKILL_MARKER" ]; then
-    SKILL_TARGETS=""
-    for tool_dir in "$HOME/.claude:Claude Code" "$HOME/.copilot:GitHub Copilot" "$HOME/.agents:Codex CLI" "$HOME/.cursor:Cursor" "$HOME/.windsurf:Windsurf" "$HOME/.minimax:MiniMax CLI" "$HOME/.openclaw:OpenClaw" "$HOME/.nanobot/workspace:NanoBot" "$HOME/.zeroclaw/workspace:ZeroClaw"; do
-        dir="${tool_dir%%:*}"
-        name="${tool_dir##*:}"
-        if [ -d "$dir" ]; then
-            SKILL_TARGETS="$SKILL_TARGETS $dir/skills/officecli"
-            echo "$name detected."
-        fi
-    done
-
-    if [ -n "$SKILL_TARGETS" ]; then
-        echo "Downloading officecli skill..."
-        if curl -fsSL "https://raw.githubusercontent.com/$REPO/main/SKILL.md" -o "/tmp/officecli-skill.md" 2>/dev/null; then
-            for target in $SKILL_TARGETS; do
-                mkdir -p "$target"
-                cp "/tmp/officecli-skill.md" "$target/SKILL.md"
-                echo "  Installed: $target/SKILL.md"
-            done
-            rm -f "/tmp/officecli-skill.md"
-        fi
-    fi
-    touch "$SKILL_MARKER"
-fi
-
 echo "OfficeCli installed successfully!"
-echo "Run 'officecli --help' to get started."
+echo "Binary path: $INSTALL_DIR/$BINARY_NAME"
+echo "No environment or agent configuration has been changed."
+echo "Optional next step: $INSTALL_DIR/$BINARY_NAME setup"
+
+if [ -t 0 ] && [ -t 1 ]; then
+    printf "Run optional setup now? [y/N]: "
+    read -r RUN_SETUP
+    case "$RUN_SETUP" in
+        y|Y|yes|YES)
+            "$INSTALL_DIR/$BINARY_NAME" setup
+            ;;
+        *)
+            echo "Skipped setup. You can run '$INSTALL_DIR/$BINARY_NAME setup' later."
+            ;;
+    esac
+else
+    echo "Non-interactive install detected. Run '$INSTALL_DIR/$BINARY_NAME setup' later if you want PATH, skills, MCP, macOS compatibility tweaks, or auto-update."
+fi

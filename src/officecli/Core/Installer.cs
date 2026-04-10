@@ -4,16 +4,14 @@
 namespace OfficeCli.Core;
 
 /// <summary>
-/// Installs officecli binary, skills, and MCP (for tools without skill support).
-/// Usage:
-///   officecli install [target]  — install binary + skills + fallback MCP
+/// Installs the officecli binary, and offers an explicit opt-in setup flow for
+/// PATH changes, skills, MCP registration, macOS compatibility tweaks, and
+/// update settings.
 /// </summary>
 public static class Installer
 {
-    private static readonly string BinDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".local", "bin");
-
+    private static readonly string HomeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    private static readonly string BinDir = Path.Combine(HomeDir, ".local", "bin");
     private static readonly string TargetPath = Path.Combine(BinDir, "officecli");
 
     /// <summary>
@@ -22,149 +20,380 @@ public static class Installer
     /// </summary>
     private static readonly (string McpTarget, string DetectDir, string[] SkillAliases)[] McpTargets =
     [
-        ("claude", ".claude",                          ["claude", "claude-code"]),
-        ("cursor", ".cursor",                          ["cursor"]),
-        ("vscode", ".vscode",                          []),   // no skill equivalent
-        ("lms",    ".cache/lm-studio",                 []),   // no skill equivalent
+        ("claude", ".claude", ["claude", "claude-code"]),
+        ("cursor", ".cursor", ["cursor"]),
+        ("vscode", ".vscode", []),
+        ("lms", ".cache/lm-studio", []),
     ];
 
-    public static int Run(string[] args)
+    internal sealed record InstallBinaryResult(string SourcePath, string InstallDir, string InstalledPath, bool Copied);
+
+    internal sealed class InstallActionHooks
     {
-        InstallBinary();
+        public Func<InstallBinaryResult>? InstallBinary { get; init; }
+        public Func<bool>? IsInteractive { get; init; }
+        public Func<string, bool>? ConfirmRunSetup { get; init; }
+        public Func<string, int>? RunSetup { get; init; }
+        public Action<string>? WriteLine { get; init; }
+    }
 
+    internal sealed class SetupSelections
+    {
+        public bool AddToPath { get; set; }
+        public bool InstallSkills { get; set; }
+        public bool RegisterMcp { get; set; }
+        public bool ApplyMacCompatibility { get; set; }
+        public bool EnableAutoUpdate { get; set; }
+    }
+
+    internal sealed class SetupActionHooks
+    {
+        public Action<string>? WriteLine { get; init; }
+        public Action? AddToPath { get; init; }
+        public Func<string, HashSet<string>>? InstallSkills { get; init; }
+        public Action<HashSet<string>, string>? InstallMcpFallback { get; init; }
+        public Action<string>? ApplyMacCompatibility { get; init; }
+        public Action<bool>? SetAutoUpdate { get; init; }
+    }
+
+    public static int RunInstall(string[] args)
+    {
         var target = args.Length >= 1 ? args[0] : "all";
-        var skilledTools = SkillInstaller.Install(target);
+        try { return RunInstallCore(target); }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return 1;
+        }
+    }
 
-        // Install MCP for tools that didn't get a skill
-        InstallMcpFallback(skilledTools, target);
+    public static int RunSetup(string[] args)
+    {
+        var target = args.Length >= 1 ? args[0] : "all";
+        try { return RunSetupCore(target); }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return 1;
+        }
+    }
 
+    internal static int RunInstallCore(string target, InstallActionHooks? hooks = null)
+    {
+        hooks ??= new InstallActionHooks();
+        var writeLine = hooks.WriteLine ?? Console.WriteLine;
+        var installBinary = hooks.InstallBinary ?? (() => InstallBinary());
+        var isInteractive = hooks.IsInteractive ?? IsInteractiveConsole;
+        var confirmRunSetup = hooks.ConfirmRunSetup ?? PromptYesNo;
+        var runSetup = hooks.RunSetup ?? (nextTarget => RunSetupCore(nextTarget));
+
+        var result = installBinary();
+
+        if (!result.Copied)
+        {
+            writeLine($"Binary already installed at {result.InstalledPath}");
+        }
+
+        writeLine("OfficeCli installed successfully.");
+        writeLine($"Binary path: {result.InstalledPath}");
+        writeLine("No environment or agent configuration has been changed.");
+        writeLine($"Optional next step: {result.InstalledPath} setup {target}");
+
+        if (!isInteractive())
+            return 0;
+
+        if (!confirmRunSetup("Run optional setup now?"))
+        {
+            PrintSetupHints(writeLine, result.InstalledPath, target);
+            return 0;
+        }
+
+        return runSetup(target);
+    }
+
+    internal static int RunSetupCore(string target)
+    {
+        if (!IsInteractiveConsole())
+        {
+            PrintSetupHints(Console.WriteLine, TargetPath, target);
+            return 0;
+        }
+
+        var installedPath = Environment.ProcessPath ?? TargetPath;
+        Console.WriteLine("Optional setup");
+        Console.WriteLine("Each step is opt-in. Default is No.");
+        Console.WriteLine();
+
+        var selections = new SetupSelections
+        {
+            AddToPath = PromptYesNo($"Add {BinDir} to PATH?"),
+            InstallSkills = PromptYesNo($"Install OfficeCli skills for detected agents (target: {target})?"),
+            RegisterMcp = PromptYesNo($"Register MCP for detected tools not covered by skills (target: {target})?"),
+            ApplyMacCompatibility = OperatingSystem.IsMacOS() &&
+                                    PromptYesNo("Apply macOS compatibility tweaks (remove quarantine and ad-hoc codesign)?"),
+            EnableAutoUpdate = PromptYesNo("Enable automatic update checks?")
+        };
+
+        ExecuteSetupSelections(target, selections, installedPath);
         return 0;
     }
 
-    private static void InstallMcpFallback(HashSet<string> skilledTools, string target)
+    internal static void ExecuteSetupSelections(
+        string target,
+        SetupSelections selections,
+        string? installedPath = null,
+        SetupActionHooks? hooks = null)
     {
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var isAll = target.Equals("all", StringComparison.OrdinalIgnoreCase);
+        hooks ??= new SetupActionHooks();
 
-        foreach (var (mcpTarget, detectDir, skillAliases) in McpTargets)
+        var writeLine = hooks.WriteLine ?? Console.WriteLine;
+        var addToPath = hooks.AddToPath ?? AddBinDirToPath;
+        var installSkills = hooks.InstallSkills ?? SkillInstaller.Install;
+        var installMcpFallback = hooks.InstallMcpFallback ?? InstallMcpFallback;
+        var applyMacCompatibility = hooks.ApplyMacCompatibility ?? ApplyMacCompatibility;
+        var setAutoUpdate = hooks.SetAutoUpdate ?? UpdateChecker.SetAutoUpdate;
+
+        HashSet<string> skilledTools = [];
+
+        if (selections.AddToPath)
         {
-            // If targeting a specific tool, only process matching MCP target
-            if (!isAll && !mcpTarget.Equals(target, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            // Skip if skill was already installed for this tool
-            if (skillAliases.Any(a => skilledTools.Contains(a)))
-                continue;
-
-            // Only install if the tool's directory exists
-            if (Directory.Exists(Path.Combine(home, detectDir)))
-                McpInstaller.Install(mcpTarget);
+            addToPath();
         }
+        else
+        {
+            writeLine($"Skipped PATH update. You can do this later with: officecli setup {target}");
+            writeLine($"Manual PATH line: export PATH=\"{BinDir}:$PATH\"");
+        }
+
+        if (selections.InstallSkills)
+        {
+            skilledTools = installSkills(target);
+        }
+        else
+        {
+            writeLine($"Skipped skill installation. You can do this later with: officecli skills install");
+        }
+
+        if (selections.RegisterMcp)
+        {
+            installMcpFallback(skilledTools, target);
+        }
+        else
+        {
+            writeLine($"Skipped MCP registration. You can do this later with: officecli mcp <target> or officecli mcp list");
+        }
+
+        if (OperatingSystem.IsMacOS())
+        {
+            if (selections.ApplyMacCompatibility)
+            {
+                applyMacCompatibility(installedPath ?? (Environment.ProcessPath ?? TargetPath));
+            }
+            else
+            {
+                writeLine("Skipped macOS compatibility tweaks. You can rerun setup later if Gatekeeper blocks execution.");
+            }
+        }
+
+        setAutoUpdate(selections.EnableAutoUpdate);
+        writeLine($"autoUpdate = {selections.EnableAutoUpdate.ToString().ToLowerInvariant()}");
     }
 
-    private static void InstallBinary()
+    internal static InstallBinaryResult InstallBinary(string? sourcePath = null, string? installDir = null)
     {
-        var src = Environment.ProcessPath;
+        var src = sourcePath ?? Environment.ProcessPath;
         if (string.IsNullOrEmpty(src))
-            return;
+            throw new InvalidOperationException("Unable to determine officecli executable path.");
 
-        // Already at target location — skip
-        if (string.Equals(Path.GetFullPath(src), Path.GetFullPath(TargetPath), StringComparison.Ordinal))
-            return;
+        var destinationDir = installDir ?? BinDir;
+        var destinationPath = Path.Combine(destinationDir, "officecli");
 
-        // Skip if not a self-contained published binary (e.g. running via dotnet run)
-        // Self-contained single-file binaries are typically >5MB; framework-dependent builds are <1MB
+        if (string.Equals(Path.GetFullPath(src), Path.GetFullPath(destinationPath), StringComparison.Ordinal))
+            return new InstallBinaryResult(src, destinationDir, destinationPath, Copied: false);
+
         var srcInfo = new FileInfo(src);
         if (srcInfo.Length < 5 * 1024 * 1024)
         {
-            Console.WriteLine($"Skipping binary install: not a published self-contained binary.");
-            Console.WriteLine($"  Run: dotnet publish -c Release -r <rid> --self-contained -p:PublishSingleFile=true");
-            return;
+            throw new InvalidOperationException(
+                "Skipping binary install: not a published self-contained binary. Run: dotnet publish -c Release -r <rid> --self-contained -p:PublishSingleFile=true");
         }
 
-        Directory.CreateDirectory(BinDir);
-        File.Copy(src, TargetPath, overwrite: true);
+        Directory.CreateDirectory(destinationDir);
+        File.Copy(src, destinationPath, overwrite: true);
 
-        // Preserve executable permission on Unix
         if (!OperatingSystem.IsWindows())
         {
             try
             {
-                File.SetUnixFileMode(TargetPath,
+                File.SetUnixFileMode(destinationPath,
                     UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
                     UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
                     UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
             }
-            catch { /* best effort */ }
+            catch { }
         }
 
-        Console.WriteLine($"Installed binary to {TargetPath}");
+        return new InstallBinaryResult(src, destinationDir, destinationPath, Copied: true);
+    }
 
-        EnsurePath();
+    internal static void InstallMcpFallback(HashSet<string> skilledTools, string target)
+    {
+        var isAll = target.Equals("all", StringComparison.OrdinalIgnoreCase);
+
+        foreach (var (mcpTarget, detectDir, skillAliases) in McpTargets)
+        {
+            if (!isAll && !mcpTarget.Equals(target, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (skillAliases.Any(a => skilledTools.Contains(a)))
+                continue;
+
+            if (Directory.Exists(Path.Combine(HomeDir, detectDir)))
+                McpInstaller.Install(mcpTarget);
+        }
+    }
+
+    private static bool IsInteractiveConsole()
+    {
+        try
+        {
+            return !Console.IsInputRedirected && !Console.IsOutputRedirected;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool PromptYesNo(string prompt)
+    {
+        Console.Write($"{prompt} [y/N]: ");
+        var input = Console.ReadLine()?.Trim();
+        return input is not null &&
+               (input.Equals("y", StringComparison.OrdinalIgnoreCase) ||
+                input.Equals("yes", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static void PrintSetupHints(Action<string> writeLine, string installedPath, string target)
+    {
+        writeLine("Optional configuration steps were skipped.");
+        writeLine($"Run later: {installedPath} setup {target}");
+        writeLine("Manual one-off commands:");
+        writeLine($"  {installedPath} config autoUpdate true");
+        writeLine($"  {installedPath} skills install");
+        writeLine($"  {installedPath} mcp list");
+    }
+
+    private static void AddBinDirToPath()
+    {
+        if (IsInPath())
+            return;
+
+        if (OperatingSystem.IsWindows())
+        {
+            AddBinDirToWindowsPath();
+            return;
+        }
+
+        var exportLine = $"export PATH=\"{BinDir}:$PATH\"";
+        string profilePath;
+        var shell = Environment.GetEnvironmentVariable("SHELL") ?? "";
+
+        if (shell.EndsWith("/zsh", StringComparison.Ordinal))
+            profilePath = Path.Combine(HomeDir, ".zshrc");
+        else if (shell.EndsWith("/bash", StringComparison.Ordinal))
+            profilePath = Path.Combine(HomeDir, ".bashrc");
+        else if (shell.EndsWith("/fish", StringComparison.Ordinal))
+        {
+            var fishConfig = Path.Combine(HomeDir, ".config", "fish", "config.fish");
+            AppendIfMissing(fishConfig, $"fish_add_path {BinDir}", BinDir);
+            return;
+        }
+        else
+            profilePath = Path.Combine(HomeDir, ".profile");
+
+        AppendIfMissing(profilePath, exportLine, BinDir);
+    }
+
+    private static void AddBinDirToWindowsPath()
+    {
+        var currentPath = Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.User) ?? "";
+        var parts = currentPath.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Any(p => PathsEqual(p, BinDir)))
+            return;
+
+        var updated = string.IsNullOrWhiteSpace(currentPath) ? BinDir : $"{currentPath};{BinDir}";
+        Environment.SetEnvironmentVariable("Path", updated, EnvironmentVariableTarget.User);
+        Console.WriteLine($"Added {BinDir} to PATH (restart your terminal to take effect).");
     }
 
     private static bool IsInPath()
     {
         var pathEnv = Environment.GetEnvironmentVariable("PATH") ?? "";
-        return pathEnv.Split(Path.PathSeparator).Any(p =>
-        {
-            try { return Path.GetFullPath(p).Equals(Path.GetFullPath(BinDir), StringComparison.OrdinalIgnoreCase); }
-            catch { return false; }
-        });
+        return pathEnv.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Any(p => PathsEqual(p, BinDir));
     }
 
-    private static void EnsurePath()
+    private static bool PathsEqual(string left, string right)
     {
-        if (IsInPath())
-            return;
-
-        var exportLine = $"export PATH=\"{BinDir}:$PATH\"";
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-
-        // Determine shell profile to update
-        string profilePath;
-        if (OperatingSystem.IsWindows())
+        try
         {
-            // Windows: just advise, don't auto-modify registry
-            Console.WriteLine($"  Add {BinDir} to your system PATH.");
-            return;
+            return Path.GetFullPath(left).Equals(Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase);
         }
-
-        var shell = Environment.GetEnvironmentVariable("SHELL") ?? "";
-        if (shell.EndsWith("/zsh"))
-            profilePath = Path.Combine(home, ".zshrc");
-        else if (shell.EndsWith("/bash"))
-            profilePath = Path.Combine(home, ".bashrc");
-        else if (shell.EndsWith("/fish"))
+        catch
         {
-            // fish uses a different syntax
-            var fishConfig = Path.Combine(home, ".config", "fish", "config.fish");
-            var fishLine = $"fish_add_path {BinDir}";
-            AppendIfMissing(fishConfig, fishLine, BinDir);
-            return;
+            return false;
         }
-        else
-        {
-            // Unknown shell — try .profile as fallback
-            profilePath = Path.Combine(home, ".profile");
-        }
-
-        AppendIfMissing(profilePath, exportLine, BinDir);
     }
 
     private static void AppendIfMissing(string profilePath, string line, string marker)
     {
-        // Check if already present in the file
         if (File.Exists(profilePath))
         {
             var content = File.ReadAllText(profilePath);
-            if (content.Contains(marker))
+            if (content.Contains(marker, StringComparison.Ordinal))
                 return;
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(profilePath)!);
-        File.AppendAllText(profilePath, $"\n# Added by officecli\n{line}\n");
-        Console.WriteLine($"  Added {marker} to PATH in {profilePath}");
-        Console.WriteLine($"  Run: source {profilePath}  (or open a new terminal)");
+        File.AppendAllText(profilePath, $"\n# Added by officecli setup\n{line}\n");
+        Console.WriteLine($"Added {marker} to PATH in {profilePath}");
+        Console.WriteLine($"Run: source {profilePath}  (or open a new terminal)");
+    }
+
+    private static void ApplyMacCompatibility(string installedPath)
+    {
+        if (!OperatingSystem.IsMacOS())
+            return;
+
+        try
+        {
+            using var xattr = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "xattr",
+                Arguments = $"-d com.apple.quarantine \"{installedPath}\"",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            });
+            xattr?.WaitForExit(3000);
+        }
+        catch { }
+
+        try
+        {
+            using var codesign = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "codesign",
+                Arguments = $"-s - -f \"{installedPath}\"",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            });
+            codesign?.WaitForExit(5000);
+        }
+        catch { }
     }
 }

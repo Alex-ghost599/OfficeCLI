@@ -19,11 +19,19 @@ curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh
 irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex
 ```
 
-After installation, run `source ~/.zshrc` (macOS) or `source ~/.bashrc` (Linux) to make the `officecli` command available.
+Installation only copies the binary. Optional environment and agent setup is separate:
+
+```bash
+officecli setup
+```
 
 Verify: `officecli --version`
 
-officecli auto-updates daily in the background.
+Automatic update checks are disabled by default. Enable them explicitly with:
+
+```bash
+officecli config autoUpdate true
+```
 
 ---
 
