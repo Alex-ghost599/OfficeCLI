@@ -29,6 +29,8 @@ fi
 officecli --version
 ```
 
+`install.sh` / `install.ps1` now install the binary only. Run `officecli setup` only if you want to opt into PATH changes, skill installation, MCP registration, macOS compatibility tweaks, or auto-update. Automatic update checks remain off by default until you explicitly enable them with `officecli config autoUpdate true` or via `officecli setup`.
+
 ---
 # officecli: v1.0.23
 
@@ -387,7 +389,7 @@ Batch fields: `command`, `path`, `parent`, `type`, `from`, `to`, `index`, `after
 | **Chart series cannot be added after creation** | Same as pptx: `set --prop data=` can only update existing series, not add new ones. Delete and recreate the chart with all series in the `add` command. |
 | **Complex numbering definitions** | `listStyle=bullet/numbered` covers simple cases. For multi-level lists with custom formatting, use `numId`/`numLevel` properties. Creating new numbering definitions may require understanding the numbering part. |
 | **Shell quoting in batch with echo** | `echo '...' \| officecli batch` fails when JSON values contain apostrophes or `$`. Use heredoc: `cat <<'EOF' \| officecli batch doc.docx`. |
-| **Batch intermittent failure** | Approximately 1-in-15 batch operations may fail with "Failed to send to resident" when using batch+resident mode. Retry the command, or close/reopen the file. Split large batch arrays into 10-15 operation chunks. |
+| **Large batch readability** | Prefer readable batch chunks (for example 10-15 operations) so failures are easier to localize and rerun. Current `develop` has been validated by the latest full Round3 manual audit. |
 | **Table-level `padding` produces invalid XML** | Do not use `set tbl[N] --prop padding=N`. It creates invalid `tblCellMar`. Use cell-level `padding.top`/`padding.bottom` instead. If already applied, remove with `raw-set --xpath "//w:tbl[N]/w:tblPr/w:tblCellMar" --action remove`. |
 | **Internal hyperlinks not supported** | The `hyperlink` command only accepts absolute URIs (`https://...`). Fragment URLs (`#bookmark`) are rejected. For internal cross-references, use descriptive text or `raw-set` with `<w:hyperlink w:anchor="bookmarkName">`. |
 | **Table `--index` positioning unreliable** | `--index N` on `add /body --type table` may be ignored (table appends to end). `move` also may not work for tables. Workaround: add content in the desired order, or remove/re-add surrounding elements. |

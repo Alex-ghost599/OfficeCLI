@@ -40,6 +40,8 @@ fi
 officecli --version
 ```
 
+`install.sh` / `install.ps1` now install the binary only. Run `officecli setup` only if you want to opt into PATH changes, skill installation, MCP registration, macOS compatibility tweaks, or auto-update. Automatic update checks remain off by default until you explicitly enable them with `officecli config autoUpdate true` or via `officecli setup`.
+
 ---
 
 ## Use When
@@ -158,7 +160,7 @@ Before delivering the `.xlsx` file, verify all items:
 | Issue | Workaround |
 |-------|------------|
 | `!` escaping in cross-sheet formulas | Always use heredoc batch. Verify with `officecli get`. |
-| Batch failure at scale | Use resident mode + 15-20 ops per batch. If failure persists, reduce to 8-12. Retry individually as last resort. |
+| Batch readability | Prefer resident mode plus reviewable batch chunks (for example 15-20 ops, or 8-12 for denser formula passes) so failures are easier to localize and rerun. |
 | Cannot rename sheets | Plan sheet names upfront before creation. |
 | Sensitivity tables are manual | Each cell needs an explicit formula. No Excel DATA TABLE support. |
 | Chart series fixed at creation | Cannot add series later. Plan all series before `add`. |
