@@ -32,6 +32,8 @@ fi
 officecli --version
 ```
 
+`install.sh` / `install.ps1` now install the binary only. Run `officecli setup` only if you want to opt into PATH changes, skill installation, MCP registration, macOS compatibility tweaks, or auto-update. Automatic update checks remain off by default until you explicitly enable them with `officecli config autoUpdate true` or via `officecli setup`.
+
 ---
 
 ## Use When

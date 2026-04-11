@@ -28,6 +28,8 @@ fi
 officecli --version
 ```
 
+`install.sh` / `install.ps1` now install the binary only. Run `officecli setup` only if you want to opt into PATH changes, skill installation, MCP registration, macOS compatibility tweaks, or auto-update. Automatic update checks remain off by default until you explicitly enable them with `officecli config autoUpdate true` or via `officecli setup`.
+
 ---
 
 ## Quick Reference
@@ -426,7 +428,7 @@ Batch mode executes multiple operations in a single open/save cycle.
 | **Formula cached values for new formulas** | OfficeCLI writes formula strings natively. For newly added formulas, the cached value may not update until the file is opened in Excel/LibreOffice. Existing formula cached values are preserved. |
 | **No auto-fit column width** | No "auto-fit" column width based on content. Set `width` explicitly on each column. |
 | **Shell quoting in batch with echo** | `echo '...' \| officecli batch` fails when JSON values contain apostrophes or `$`. Use heredoc: `cat <<'EOF' \| officecli batch data.xlsx`. |
-| **Batch intermittent failure** | Batch+resident mode has a high failure rate (up to 1-in-3 in some sessions). For maximum reliability: (1) prefer batch WITHOUT resident mode, (2) keep batches to 8-12 operations, (3) always check batch output for failures, (4) retry failed operations individually. For critical formulas (especially cross-sheet), consider using individual `set` commands which have 100% reliability. |
+| **Large batch readability** | Prefer reviewable batch sizes (for example 8-12 operations for formula-heavy edits) so failures are easier to localize and rerun. Current `develop` has been validated by the latest full Round3 manual audit. |
 | **Data bar default min/max invalid** | Creating a data bar without `--prop min=N --prop max=N` produces empty `val` attributes in cfvo elements, which may be rejected by strict XML validators or Excel. Always specify explicit min and max values. |
 | **Cell protection requires sheet protection** | `locked` and `formulahidden` properties only take effect when the sheet itself is protected. |
 

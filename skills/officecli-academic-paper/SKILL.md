@@ -32,6 +32,8 @@ fi
 officecli --version
 ```
 
+`install.sh` / `install.ps1` now install the binary only. Run `officecli setup` only if you want to opt into PATH changes, skill installation, MCP registration, macOS compatibility tweaks, or auto-update. Automatic update checks remain off by default until you explicitly enable them with `officecli config autoUpdate true` or via `officecli setup`.
+
 ---
 
 ## Use When
@@ -162,7 +164,7 @@ Run verification loop: `validate`, `view outline`, `view issues`, `view text`. F
 | Shell escaping for LaTeX | Double backslashes in bash: `--prop "formula=\\frac{a}{b}"`. Use heredoc for complex formulas. |
 | Dollar sign `$` in text | Bash expands `$` as variable in double quotes. Use single quotes or `\$`. See creating.md D-10. |
 | Batch JSON values | ALL values must be strings: `"true"` not `true`, `"24"` not `24`. |
-| Batch intermittent failure | ~1-in-15 failure rate. Retry on error. Keep arrays to 10-15 max. |
+| Batch readability | Prefer readable batch chunks (for example 10-15 operations) so failures are easier to localize and rerun. Current `develop` has been validated by the latest full Round3 manual audit. |
 | TOC displays blank in LibreOffice | TOC field renders as "Update field to see table of contents" in LibreOffice/PDF — this is normal OOXML behavior. In Microsoft Word: Ctrl+A → F9 to update all fields. For LibreOffice-only recipients: add static text TOC paragraphs after the field, or include a delivery note asking the user to open in Word and press F9. |
 | `move` on oMathPara not reliable | `move` command does not reliably reposition equation paragraphs (oMathPara elements). Workaround: use `add /body --type equation` to create the equation at the target position, then `remove` the original. Do NOT use `move` on equations. |
 | `pbdr.bottom` XML order bug (P3) | `set --prop pbdr.bottom=...` may generate `<w:pBdr>` with child elements in wrong order, causing `validate` to report a pBdr schema error. **Workaround:** use `raw-set` to write the full `<w:pBdr>` XML manually (see creating.md D-4b). This is a known CLI bug — P3, CLI team owns the fix. |

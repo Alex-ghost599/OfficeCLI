@@ -565,6 +565,18 @@ officecli validate report.docx && officecli view report.docx issues --json
 ./build.sh
 ```
 
+## Round3 수동 감사 스크립트
+
+현재 `develop` 검증 상태: **94 passed / 0 partial / 0 failed / 0 skipped**.
+
+격리 환경에서 전체 Round3 수동 기능 감사를 다시 실행하려면 다음을 사용합니다.
+
+```bash
+python3 scripts/manual_round3_audit.py
+```
+
+이 스크립트는 명시적 `officecli` 서브프로세스 호출 기반의 감사 모델을 유지하면서 격리된 `HOME/TMPDIR`를 만들고, 로그와 리포트를 기본적으로 repo 외부 감사 워크스페이스에 기록합니다. `부분 통과` 또는 `실패`가 하나라도 있으면 비영 종료 코드를 반환합니다.
+
 ## 라이선스
 
 [Apache License 2.0](LICENSE)

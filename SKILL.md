@@ -33,6 +33,16 @@ Automatic update checks are disabled by default. Enable them explicitly with:
 officecli config autoUpdate true
 ```
 
+## Current Verification
+
+Current `develop` is validated by the repo-local isolated Round3 manual audit:
+
+```bash
+python3 scripts/manual_round3_audit.py
+```
+
+Latest verified result: **94 passed / 0 partial / 0 failed / 0 skipped**.
+
 ---
 
 ## Strategy

@@ -567,6 +567,8 @@ officecli validate report.docx && officecli view report.docx issues --json
 
 ## Round3 手工审计脚本
 
+当前 `develop` 的最新验证状态：**94 passed / 0 partial / 0 failed / 0 skipped**。
+
 如果要在隔离环境里重跑完整的 Round3 手工功能审计，可直接运行：
 
 ```bash
