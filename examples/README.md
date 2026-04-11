@@ -2,6 +2,18 @@
 
 Comprehensive examples demonstrating OfficeCLI capabilities for Word, Excel, and PowerPoint automation.
 
+## Verification Status
+
+Current `develop` is validated by the full isolated Round3 manual audit: **94 passed / 0 partial / 0 failed / 0 skipped**.
+
+Re-run the same repo-local audit workflow from the repository root with:
+
+```bash
+python3 scripts/manual_round3_audit.py
+```
+
+Examples assume `officecli` is already installed. `officecli install` copies the binary only; run `officecli setup` separately if you want optional PATH, skill, MCP, macOS compatibility, or auto-update configuration.
+
 ## 📂 Directory Structure
 
 ```

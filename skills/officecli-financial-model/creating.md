@@ -205,7 +205,7 @@ Financial models involve 200–400 commands. Using the right execution mode per 
 - Any series of `set` commands — filling values, formulas, widths, formats
 - This covers steps 2, 3, 4, 5, 6, 8 entirely
 
-**Batch chunk size: 15–20 operations max.** The known-issue "Failed to send to resident" occurs more often with larger arrays. Split by logical group (one sheet per batch, or one formula section per batch):
+**Batch chunk size: 15–20 operations max.** Split by logical group (one sheet per batch, or one formula section per batch) so failures are easier to localize and rerun:
 
 ```bash
 # Batch template — one heredoc per logical group
@@ -953,7 +953,7 @@ cd /Users/veryliu && node /Users/veryliu/Documents/GitHub/OfficeCli/scripts/scre
 | # | Issue | Workaround |
 |---|-------|------------|
 | F-1 | `!` escaping in cross-sheet formulas | Always use heredoc batch. Verify with `officecli get`. If `\!` appears, delete and re-run. |
-| F-2 | Batch failure at scale | Use resident mode (`open`/`close`) + batch chunks of 15–20 ops. If a batch still fails with "Failed to send to resident", split into smaller chunks and retry. Fall back to individual commands only as last resort. |
+| F-2 | Large batch diagnosis | Use resident mode (`open`/`close`) + batch chunks of 15–20 ops. For denser sections, reduce to smaller chunks so failures are easier to localize and rerun. Fall back to individual commands only as last resort. |
 | F-3 | calcPr duplicate elements | Use `set / --prop calc.fullCalcOnLoad=true` (high-level API). Do NOT use raw-set to insert calcPr — it creates duplicates. |
 | F-3a | Sheet names with `&` or spaces cause `#NAME?` | Wrap in single quotes: `'P&L'!B3`, `'Income Statement'!C4`. Plain `P&L!B3` fails silently — error only visible in screenshots, not in `validate` or `query`. |
 | F-4 | No auto-fit column width | Set explicitly: labels=24-28, numbers=14-18. |

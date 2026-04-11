@@ -2,6 +2,8 @@
 
 Professional presentation style templates for OfficeCLI. Each style includes a pre-generated `.pptx` file and reference build script.
 
+Validated on current `develop` by the full isolated Round3 manual audit: **94 passed / 0 partial / 0 failed / 0 skipped**. Re-run from the repo root with `python3 scripts/manual_round3_audit.py`.
+
 ## ✅ Available Templates (14)
 
 All templates include working build scripts and pre-generated `.pptx` files ready to use.
