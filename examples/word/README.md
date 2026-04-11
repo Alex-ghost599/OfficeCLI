@@ -2,6 +2,8 @@
 
 Examples demonstrating OfficeCLI capabilities for Word document automation.
 
+Validated on current `develop` by the full isolated Round3 manual audit: **94 passed / 0 partial / 0 failed / 0 skipped**. Re-run from the repo root with `python3 scripts/manual_round3_audit.py`.
+
 ## 📄 Scripts
 
 ### [gen-formulas.sh](gen-formulas.sh)
