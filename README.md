@@ -58,13 +58,13 @@ Open-source. Single binary. No Office installation. No dependencies. Works every
 
 ## For AI Agents — Get Started in One Line
 
-Paste this into your AI agent's chat — it will read the skill file and install everything automatically:
+Paste this into your AI agent's chat — it will read the skill file and learn the current OfficeCLI workflow:
 
 ```
 curl -fsSL https://officecli.ai/SKILL.md
 ```
 
-That's it. The skill file teaches the agent how to install the binary and use all commands.
+That's it. The skill file teaches the agent how to use the binary, when to run `officecli setup`, and how to work with all supported document formats.
 
 > **Technical details:** OfficeCLI ships with a [SKILL.md](SKILL.md) that covers command syntax, architecture, and common pitfalls. After installation, your agent can immediately create, read, and modify any Office document.
 
@@ -580,6 +580,8 @@ Requires [.NET 10 SDK](https://dotnet.microsoft.com/download) for compilation on
 
 ## Manual Round3 Audit
 
+Current verification status on `develop`: **94 passed / 0 partial / 0 failed / 0 skipped**.
+
 For a repo-local, reusable version of the full isolated manual functional audit workflow, run:
 
 ```bash
@@ -630,7 +632,7 @@ keywords: office, cli, ai-agent, automation, docx, xlsx, pptx, openxml, document
 ai-agent-compatible: true
 mcp-server: true
 skill-file: SKILL.md
-skill-file-lines: 403
+skill-file-lines: 502
 alternatives: python-docx, openpyxl, python-pptx, libreoffice --headless
 install-command-unix: curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | bash
 install-command-windows: irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex

@@ -565,6 +565,18 @@ officecli validate report.docx && officecli view report.docx issues --json
 ./build.sh
 ```
 
+## Round3 手動監査スクリプト
+
+現在の `develop` の検証状態：**94 passed / 0 partial / 0 failed / 0 skipped**。
+
+隔離環境で完全な Round3 手動機能監査を再実行するには、次を実行します。
+
+```bash
+python3 scripts/manual_round3_audit.py
+```
+
+このスクリプトは明示的な `officecli` サブプロセス呼び出しを維持したまま、隔離 `HOME/TMPDIR` を作成し、ログとレポートを repo 外の監査ワークスペースに出力します。`部分成功` または `失敗` が 1 件でもあれば非ゼロで終了します。
+
 ## ライセンス
 
 [Apache License 2.0](LICENSE)
