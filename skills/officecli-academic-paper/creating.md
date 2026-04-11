@@ -724,9 +724,9 @@ For `$` dollar signs in text, see D-10.
 
 `CORRECT: {"bold":"true","size":"11"}` / `WRONG: {"bold":true,"size":11}` -- non-string values fail with deserialization error.
 
-### D-7: Batch Intermittent Failure (~1-in-15)
+### D-7: Batch Chunking for Readability and Reruns
 
-May fail with "Failed to send to resident". Keep arrays to 10-15 max, retry on failure, use heredoc syntax.
+Prefer readable heredoc batches of roughly 10-15 operations so failures are easier to localize and rerun without rebuilding the entire document.
 
 ### D-8: Table `--index` Positioning Unreliable
 
