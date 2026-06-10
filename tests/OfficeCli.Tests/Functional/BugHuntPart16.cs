@@ -94,7 +94,7 @@ public class BugHuntPart16 : IDisposable
         {
             if (para.Type == "paragraph")
             {
-                para.Format.Should().ContainKey("alignment",
+                para.Format.Should().ContainKey("align",
                     "all paragraphs in a cell should get the alignment, not just the first");
             }
         }
@@ -258,8 +258,7 @@ public class BugHuntPart16 : IDisposable
     }
 
 
-    // ==================== BUG #10: PPTX table Get doesn't include tableStyleId readback ====================
-    // When creating a table with a style, the style ID should be readable via Get.
+    // ==================== BUG #10: PPTX table style reads back through canonical style key ====================
     [Fact]
     public void Pptx_Table_Set_Style_ThenGet_ShouldShowStyle()
     {
@@ -279,7 +278,7 @@ public class BugHuntPart16 : IDisposable
 
         var table = pptx.Get("/slide[1]/table[1]");
         table.Should().NotBeNull();
-        table.Format.Should().ContainKey("tableStyleId",
-            "table Get should include tableStyleId after Set style");
+        table.Format["style"].Should().Be("medium1",
+            "table Get normalizes tableStyleId/tableStyle input aliases to canonical style");
     }
 }

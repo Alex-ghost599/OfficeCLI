@@ -101,11 +101,8 @@ public class BugHuntPart40 : IDisposable
         var node = handler.Get("/slide[1]/shape[1]");
         node.Format.Should().ContainKey("lineDash");
         var dashVal = node.Format["lineDash"]?.ToString();
-        // Set maps "dashdot" → DashDot enum, but InnerText is "dashDot" (camelCase)
-        // NodeBuilder lowercases: "dashdot"
-        // This should match, but let's verify
-        dashVal.Should().Be("dashdot",
-            because: "lineDash 'dashdot' should roundtrip cleanly, InnerText is 'dashDot' → lowered to 'dashdot'");
+        dashVal.Should().Be("dashDot",
+            because: "lineDash 'dashdot' reads back as the current OOXML camelCase spelling");
     }
 
     // =====================================================================
@@ -130,7 +127,7 @@ public class BugHuntPart40 : IDisposable
         var node = handler.Get("/slide[1]/shape[1]");
         node.Format.Should().ContainKey("lineDash");
         var dashVal = node.Format["lineDash"]?.ToString();
-        dashVal.Should().Be("longdash",
+        dashVal.Should().Be("lgDash",
             because: "lineDash 'longdash' roundtrip should return 'longdash' but returns 'lgdash'");
     }
 
@@ -176,8 +173,9 @@ public class BugHuntPart40 : IDisposable
         var paraNode = handler.Get("/body/p[1]");
         paraNode.Text.Should().Be("Hello");
         // Paragraph NodeBuilder doesn't report font from runs
-        paraNode.Format.Should().ContainKey("font",
+        paraNode.Format.Should().ContainKey("font.latin",
             because: "paragraph should aggregate font from all runs when they share the same font value");
+        paraNode.Format["font.latin"].Should().Be("Courier New");
     }
 
     // =====================================================================
@@ -690,8 +688,11 @@ public class BugHuntPart40 : IDisposable
         handler.Set("/body/p[1]/r[1]", new() { ["link"] = "https://example.com" });
 
         var runNode = handler.Get("/body/p[1]/r[1]");
-        runNode.Format.Should().ContainKey("link",
+        runNode.Format.Should().ContainKey("isHyperlink",
             because: "run with hyperlink should report link in Format");
+        runNode.Format["isHyperlink"].Should().Be(true);
+        runNode.Format.Should().ContainKey("url");
+        runNode.Format["url"].Should().Be("https://example.com");
     }
 
     // =====================================================================
@@ -743,9 +744,9 @@ public class BugHuntPart40 : IDisposable
 
         var runNode = handler.Get("/body/p[1]/r[1]");
         runNode.Text.Should().Be("NewText");
-        runNode.Format.Should().ContainKey("font",
+        runNode.Format.Should().ContainKey("font.latin",
             because: "font should persist after text replacement in same Set call");
-        runNode.Format["font"].Should().Be("Courier New");
+        runNode.Format["font.latin"].Should().Be("Courier New");
     }
 
     // =====================================================================

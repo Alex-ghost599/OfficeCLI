@@ -44,8 +44,8 @@ public class BugHuntPart43 : IDisposable
         var node = handler.Get("/slide[1]/connector[1]");
         // BUG: Add uses "line" key, not "lineColor" — so "lineColor" is silently ignored
         // The connector gets default black (000000) instead of FF0000
-        node.Format.Should().ContainKey("lineColor");
-        node.Format["lineColor"].Should().Be("#FF0000",
+        node.Format.Should().ContainKey("color");
+        node.Format["color"].Should().Be("#FF0000",
             because: "lineColor during Add should set the connector's line color");
     }
 
@@ -211,7 +211,6 @@ public class BugHuntPart43 : IDisposable
         BlankDocCreator.Create(path);
         using var handler = new ExcelHandler(path, editable: true);
 
-        handler.Add("/", "sheet", null, new() { ["name"] = "Sheet1" });
         handler.Add("/Sheet1", "cell", null, new()
         {
             ["ref"] = "A1", ["value"] = "1", ["type"] = "boolean"
@@ -381,7 +380,6 @@ public class BugHuntPart43 : IDisposable
         BlankDocCreator.Create(path);
         using var handler = new ExcelHandler(path, editable: true);
 
-        handler.Add("/", "sheet", null, new() { ["name"] = "Sheet1" });
         handler.Add("/Sheet1", "validation", null, new()
         {
             ["sqref"] = "A1:A10",
@@ -515,7 +513,6 @@ public class BugHuntPart43 : IDisposable
         BlankDocCreator.Create(path);
         using var handler = new ExcelHandler(path, editable: true);
 
-        handler.Add("/", "sheet", null, new() { ["name"] = "Sheet1" });
         handler.Set("/Sheet1", new() { ["freeze"] = "A2" });
 
         var node = handler.Get("/Sheet1");
@@ -596,7 +593,6 @@ public class BugHuntPart43 : IDisposable
         BlankDocCreator.Create(path);
         using var handler = new ExcelHandler(path, editable: true);
 
-        handler.Add("/", "sheet", null, new() { ["name"] = "Sheet1" });
         handler.Add("/Sheet1", "cell", null, new() { ["ref"] = "A1", ["value"] = "Header" });
         handler.Add("/Sheet1", "cell", null, new() { ["ref"] = "A2", ["value"] = "Data" });
 
@@ -713,7 +709,6 @@ public class BugHuntPart43 : IDisposable
         BlankDocCreator.Create(path);
         using var handler = new ExcelHandler(path, editable: true);
 
-        handler.Add("/", "sheet", null, new() { ["name"] = "Sheet1" });
         handler.Add("/Sheet1", "cell", null, new()
         {
             ["ref"] = "A1", ["value"] = "Click"

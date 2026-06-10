@@ -223,12 +223,10 @@ public class BugHuntPart51 : IDisposable
         handler.Set("/body/p[1]/r[1]", new() { ["shading"] = "FFFF00" });
 
         var node = handler.Get("/body/p[1]/r[1]");
-        node.Format.Should().ContainKey("shading");
-        if (node.Format.ContainsKey("shading"))
-        {
-            node.Format["shading"]?.ToString().Should().Be("#FFFF00",
-                because: "Run shading round-trip: Set 'FFFF00' → Get 'FFFF00'");
-        }
+        node.Format.Should().ContainKey("shading.fill");
+        node.Format["shading.fill"]?.ToString().Should().Be("#FFFF00",
+            because: "Run shading round-trip reads back through structured shading keys");
+        node.Format["shading.val"]?.ToString().Should().Be("clear");
     }
 
     // ==================== Bug5110 ====================
@@ -357,7 +355,7 @@ public class BugHuntPart51 : IDisposable
         node.Format.Should().ContainKey("firstlineindent");
         if (node.Format.ContainsKey("firstlineindent"))
         {
-            node.Format["firstlineindent"]?.ToString().Should().Be("720");
+            node.Format["firstlineindent"]?.ToString().Should().Be("36pt");
         }
     }
 
@@ -590,7 +588,10 @@ public class BugHuntPart51 : IDisposable
         handler.Set("/body/p[1]/r[1]", new() { ["rtl"] = "true" });
 
         var node = handler.Get("/body/p[1]/r[1]");
-        node.Format.Should().ContainKey("rtl");
+        node.Format.Should().ContainKey("direction");
+        node.Format["direction"].Should().Be("rtl");
+        node.Format.Should().ContainKey("effective.rtl");
+        node.Format["effective.rtl"].Should().Be(true);
     }
 
     // ==================== Bug5127 ====================

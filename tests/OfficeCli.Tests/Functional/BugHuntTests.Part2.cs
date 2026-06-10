@@ -79,9 +79,8 @@ public partial class BugHuntTests
         ReopenExcel();
         var node = _excelHandler.Get("/Sheet1/A1");
 
-        // The underline should still be "double", not downgraded to "single"
-        // Get returns under "font.underline" key
-        var ul = node.Format.ContainsKey("font.underline") ? node.Format["font.underline"]?.ToString() : null;
+        // The underline should still be "double", not downgraded to "single".
+        var ul = node.Format.ContainsKey("underline") ? node.Format["underline"]?.ToString() : null;
         ul.Should().Be("double",
             "Double underline should be preserved when merging styles, " +
             "but ExcelStyleManager defaults baseFont underline to 'single'");
@@ -273,7 +272,8 @@ public partial class BugHuntTests
         pptx.Add("/", "slide", null, new());
         pptx.Add("/slide[1]", "shape", null, new() { ["text"] = "Test" });
 
-        // Negative duration should be rejected but int.TryParse accepts it
+        // Negative duration is now rejected; this historical bug test should
+        // guard the fixed behavior instead of preserving the old permissive path.
         var act = () => pptx.Add("/slide[1]/shape[1]", "animation", null, new()
         {
             ["effect"] = "fade",
@@ -281,8 +281,8 @@ public partial class BugHuntTests
             ["duration"] = "-500"
         });
 
-        // Should either reject negative duration or clamp to 0
-        act.Should().NotThrow("negative duration is accepted without validation — this is a bug");
+        act.Should().Throw<ArgumentException>()
+            .WithMessage("*duration*non-negative integer*");
     }
 
     /// Bug #162 — PPTX Animations: emphasis animations treated as "Out"

@@ -290,7 +290,7 @@ public class BugHuntPart31 : IDisposable
         // 2. Get + Verify initial state
         var node1 = _wordHandler.Get("/body/p[1]");
         node1.Format.Should().ContainKey("leftindent");
-        node1.Format["leftindent"].ToString().Should().Be("720");
+        node1.Format["leftindent"].ToString().Should().Be("36pt");
 
         // 3. Set (modify indentation)
         _wordHandler.Set("/body/p[1]", new() { ["leftindent"] = "1440" });
@@ -298,13 +298,13 @@ public class BugHuntPart31 : IDisposable
         // 4. Get + Verify modification
         var node2 = _wordHandler.Get("/body/p[1]");
         node2.Format.Should().ContainKey("leftindent");
-        node2.Format["leftindent"].ToString().Should().Be("1440");
+        node2.Format["leftindent"].ToString().Should().Be("72pt");
 
         // 5. Reopen + Verify persistence
         ReopenWord();
         var node3 = _wordHandler.Get("/body/p[1]");
         node3.Format.Should().ContainKey("leftindent");
-        node3.Format["leftindent"].ToString().Should().Be("1440");
+        node3.Format["leftindent"].ToString().Should().Be("72pt");
     }
 
     // EDGE CASE: Word paragraph spacing round-trip.
@@ -668,14 +668,14 @@ public class BugHuntPart31 : IDisposable
         // 2. Get + Verify initial state
         var node1 = _excelHandler.Get("/Sheet1/validation[1]");
         node1.Format["type"].ToString().Should().Be("list");
-        node1.Format["formula1"].ToString().Should().Be("Yes,No,Maybe");
+        node1.Format["formula1"].ToString().Should().Be("\"Yes,No,Maybe\"");
 
         // 3. Set (modify formula)
         _excelHandler.Set("/Sheet1/validation[1]", new() { ["formula1"] = "Yes,No" });
 
         // 4. Get + Verify modification
         var node2 = _excelHandler.Get("/Sheet1/validation[1]");
-        node2.Format["formula1"].ToString().Should().Be("Yes,No");
+        node2.Format["formula1"].ToString().Should().Be("\"Yes,No\"");
 
         // 5. Reopen + Verify persistence
         ReopenExcel();
@@ -793,8 +793,8 @@ public class BugHuntPart31 : IDisposable
         var node1 = _wordHandler.Get("/body/p[1]", 1);
         node1.Children.Should().HaveCountGreaterThan(0);
         var run1 = node1.Children[0];
-        run1.Format.Should().ContainKey("font");
-        run1.Format["font"].ToString().Should().Be("Courier New");
+        run1.Format.Should().ContainKey("font.latin");
+        run1.Format["font.latin"].ToString().Should().Be("Courier New");
         run1.Format.Should().ContainKey("size");
         run1.Format["size"].ToString().Should().Be("14pt");
 
@@ -804,15 +804,15 @@ public class BugHuntPart31 : IDisposable
         // 4. Get + Verify modification
         var node2 = _wordHandler.Get("/body/p[1]", 1);
         var run2 = node2.Children[0];
-        run2.Format.Should().ContainKey("font");
-        run2.Format["font"].ToString().Should().Be("Arial");
+        run2.Format.Should().ContainKey("font.latin");
+        run2.Format["font.latin"].ToString().Should().Be("Arial");
 
         // 5. Reopen + Verify persistence
         ReopenWord();
         var node3 = _wordHandler.Get("/body/p[1]", 1);
         var run3 = node3.Children[0];
-        run3.Format.Should().ContainKey("font");
-        run3.Format["font"].ToString().Should().Be("Arial");
+        run3.Format.Should().ContainKey("font.latin");
+        run3.Format["font.latin"].ToString().Should().Be("Arial");
         run3.Format.Should().ContainKey("size");
         run3.Format["size"].ToString().Should().Be("14pt");
     }

@@ -351,7 +351,7 @@ public class BugHuntPart48 : IDisposable
         // Paragraph-level Get should show first-run formatting
         node.Format.Should().ContainKey("bold",
             because: "paragraph should show first-run bold formatting");
-        node.Format.Should().ContainKey("font",
+        node.Format.Should().ContainKey("font.latin",
             because: "paragraph should show first-run font");
         node.Format.Should().ContainKey("size",
             because: "paragraph should show first-run size");

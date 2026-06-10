@@ -266,23 +266,26 @@ public class BugHuntPart30 : IDisposable
         // 4. Get + Verify — readback format should match Set format
         var node2 = _handler.Get("/slide[1]/table[1]/tr[1]/tc[1]", 0);
         var fill = node2.Format["fill"].ToString()!;
-        fill.Should().NotStartWith("gradient;",
-            "readback should use hyphen format matching Set input");
-        fill.Should().Contain("#FF0000");
-        fill.Should().Contain("#0000FF");
+        fill.Should().Be("gradient",
+            "table cell fill uses a type marker with gradient details in the gradient key");
+        var gradient = node2.Format["gradient"].ToString()!;
+        gradient.Should().Contain("#FF0000");
+        gradient.Should().Contain("#0000FF");
 
         // 5. Set new gradient (round-trip from readback)
         _handler.Set("/slide[1]/table[1]/tr[1]/tc[1]", new() { ["fill"] = "00FF00-FF00FF" });
 
         // 6. Get + Verify
         var node3 = _handler.Get("/slide[1]/table[1]/tr[1]/tc[1]", 0);
-        node3.Format["fill"].ToString().Should().Contain("#00FF00");
-        node3.Format["fill"].ToString().Should().Contain("#FF00FF");
+        node3.Format["fill"].ToString().Should().Be("gradient");
+        node3.Format["gradient"].ToString().Should().Contain("#00FF00");
+        node3.Format["gradient"].ToString().Should().Contain("#FF00FF");
 
         // 7. Reopen + Verify
         Reopen();
         var node4 = _handler.Get("/slide[1]/table[1]/tr[1]/tc[1]", 0);
-        node4.Format["fill"].ToString().Should().Contain("#00FF00");
+        node4.Format["fill"].ToString().Should().Be("gradient");
+        node4.Format["gradient"].ToString().Should().Contain("#00FF00");
     }
 
     // ===================== Bug 6: Table cell align all paragraphs =====================
@@ -402,19 +405,19 @@ public class BugHuntPart30 : IDisposable
 
         // 2. Get + Verify
         var node1 = _handler.Get("/slide[1]/shape[1]");
-        node1.Format["preset"].ToString().Should().Be("ellipse");
+        node1.Format["geometry"].ToString().Should().Be("ellipse");
 
         // 3. Set new preset
         _handler.Set("/slide[1]/shape[1]", new() { ["preset"] = "triangle" });
 
         // 4. Get + Verify
         var node2 = _handler.Get("/slide[1]/shape[1]");
-        node2.Format["preset"].ToString().Should().Be("triangle");
+        node2.Format["geometry"].ToString().Should().Be("triangle");
 
         // 5. Reopen + Verify
         Reopen();
         var node3 = _handler.Get("/slide[1]/shape[1]");
-        node3.Format["preset"].ToString().Should().Be("triangle");
+        node3.Format["geometry"].ToString().Should().Be("triangle");
     }
 
     // ===================== 10: Shape rotation round-trip =====================
@@ -685,12 +688,12 @@ public class BugHuntPart30 : IDisposable
 
         // 6. Get + Verify
         var node3 = _handler.Get("/slide[1]/shape[1]");
-        node3.Format.Should().NotContainKey("list");
+        node3.Format["list"].Should().Be("none");
 
         // 7. Reopen + Verify
         Reopen();
         var node4 = _handler.Get("/slide[1]/shape[1]");
-        node4.Format.Should().NotContainKey("list");
+        node4.Format["list"].Should().Be("none");
     }
 
     // ===================== 18: Slide background gradient persistence =====================
@@ -795,21 +798,21 @@ public class BugHuntPart30 : IDisposable
         _handler.Set("/slide[1]/shape[1]", new() { ["superscript"] = "true" });
 
         // 4. Get + Verify positive baseline
-        var node2 = _handler.Get("/slide[1]/shape[1]");
-        node2.Format.Should().ContainKey("baseline");
-        double.Parse(node2.Format["baseline"].ToString()!).Should().BeGreaterThan(0);
+        var run2 = _handler.Get("/slide[1]/shape[1]/paragraph[1]/run[1]");
+        run2.Format.Should().ContainKey("baseline");
+        double.Parse(run2.Format["baseline"].ToString()!.TrimEnd('%')).Should().BeGreaterThan(0);
 
         // 5. Set subscript
         _handler.Set("/slide[1]/shape[1]", new() { ["subscript"] = "true" });
 
         // 6. Get + Verify negative baseline
-        var node3 = _handler.Get("/slide[1]/shape[1]");
-        double.Parse(node3.Format["baseline"].ToString()!).Should().BeLessThan(0);
+        var run3 = _handler.Get("/slide[1]/shape[1]/paragraph[1]/run[1]");
+        double.Parse(run3.Format["baseline"].ToString()!.TrimEnd('%')).Should().BeLessThan(0);
 
         // 7. Reopen + Verify
         Reopen();
-        var node4 = _handler.Get("/slide[1]/shape[1]");
-        double.Parse(node4.Format["baseline"].ToString()!).Should().BeLessThan(0);
+        var run4 = _handler.Get("/slide[1]/shape[1]/paragraph[1]/run[1]");
+        double.Parse(run4.Format["baseline"].ToString()!.TrimEnd('%')).Should().BeLessThan(0);
     }
 
     // ===================== 22: Shape hyperlink =====================

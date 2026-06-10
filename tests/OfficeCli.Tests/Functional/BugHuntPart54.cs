@@ -931,20 +931,12 @@ public class BugHuntPart54 : IDisposable
 
         var node = handler.Get("/slide[1]/shape[1]");
 
-        // Both "preset" and "geometry" keys exist with the same value
-        // This is redundant — having two keys for the same data is confusing
-        var hasPreset = node.Format.ContainsKey("preset");
+        // Preset input is normalized to the canonical geometry readback key.
         var hasGeometry = node.Format.ContainsKey("geometry");
 
-        // Both "preset" and "geometry" keys exist — they store the same value
-        hasPreset.Should().BeTrue("'preset' key should be returned for shapes with preset geometry");
+        node.Format.Should().NotContainKey("preset",
+            because: "preset is an input alias; readback uses geometry");
         hasGeometry.Should().BeTrue("'geometry' key should be returned for shapes with preset geometry");
-        if (hasPreset && hasGeometry)
-        {
-            var presetVal = node.Format["preset"].ToString();
-            var geometryVal = node.Format["geometry"].ToString();
-            presetVal.Should().Be(geometryVal,
-                "preset and geometry keys should have the same value");
-        }
+        node.Format["geometry"].ToString().Should().Be("ellipse");
     }
 }

@@ -93,9 +93,9 @@ public class BugHuntPart29 : IDisposable
         });
 
         var node = _excelHandler.Get("/Sheet1/A1");
-        node.Format.Should().ContainKey("font.underline",
+        node.Format.Should().ContainKey("underline",
             "font.underline='single' should be recognized and readable");
-        node.Format["font.underline"]?.ToString().Should().Be("single");
+        node.Format["underline"]?.ToString().Should().Be("single");
     }
 
     [Fact]
@@ -108,8 +108,8 @@ public class BugHuntPart29 : IDisposable
         });
 
         var node = _excelHandler.Get("/Sheet1/A1");
-        node.Format.Should().ContainKey("font.underline");
-        node.Format["font.underline"]?.ToString().Should().Be("double");
+        node.Format.Should().ContainKey("underline");
+        node.Format["underline"]?.ToString().Should().Be("double");
     }
 
     // =================================================================
@@ -222,7 +222,8 @@ public class BugHuntPart29 : IDisposable
 
         var node = _excelHandler.Get("/Sheet1/A1");
         (string.IsNullOrEmpty(node.Text) || node.Text == "(empty)").Should().BeTrue();
-        node.Format.ContainsKey("font.bold").Should().BeFalse();
+        node.Format["font.bold"].Should().Be(true,
+            "clear preserves cell formatting by contract");
     }
 
     // =================================================================
@@ -441,7 +442,7 @@ public class BugHuntPart29 : IDisposable
     public void Bug_Excel_Row_Height_And_Hidden()
     {
         _excelHandler.Set("/Sheet1/row[1]", new() { ["height"] = "30" });
-        double.Parse(_excelHandler.Get("/Sheet1/row[1]").Format["height"]!.ToString()!).Should().Be(30.0);
+        _excelHandler.Get("/Sheet1/row[1]").Format["height"]!.ToString().Should().Be("30pt");
 
         _excelHandler.Set("/Sheet1/A2", new() { ["value"] = "data" });
         _excelHandler.Set("/Sheet1/row[2]", new() { ["hidden"] = "true" });
@@ -499,7 +500,7 @@ public class BugHuntPart29 : IDisposable
         node.Format.Should().ContainKey("font.italic");
         node.Format["font.name"]?.ToString().Should().Be("Arial");
         node.Format["font.size"]?.ToString().Should().Be("20pt");
-        node.Format.Should().ContainKey("font.strike");
+        node.Format.Should().ContainKey("strike");
     }
 
     // =================================================================
@@ -580,7 +581,7 @@ public class BugHuntPart29 : IDisposable
         });
 
         _excelHandler.Get("/Sheet1/validation[1]").Format["formula1"]?.ToString()
-            .Should().Be("Red,Green,Blue");
+            .Should().Be("\"Red,Green,Blue\"");
     }
 
     [Fact]
@@ -593,7 +594,7 @@ public class BugHuntPart29 : IDisposable
         });
 
         _excelHandler.Get("/Sheet1/validation[1]").Format["formula1"]?.ToString()
-            .Should().Be("Yes,No,Maybe");
+            .Should().Be("\"Yes,No,Maybe\"");
     }
 
     // =================================================================

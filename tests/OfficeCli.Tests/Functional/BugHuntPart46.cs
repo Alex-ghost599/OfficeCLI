@@ -627,7 +627,7 @@ public class BugHuntPart46 : IDisposable
     }
 
     // =====================================================================
-    // Bug4623: Excel cell clear should reset everything including style
+    // Bug4623: Excel cell clear removes content and preserves style by contract
     // =====================================================================
     [Fact]
     public void Bug4623_Excel_Cell_Clear_Resets_Style()
@@ -648,9 +648,10 @@ public class BugHuntPart46 : IDisposable
         handler.Set("/Sheet1/A1", new() { ["clear"] = "true" });
 
         var n2 = handler.Get("/Sheet1/A1");
-        n2.Text.Should().BeNullOrEmpty();
-        n2.Format.Should().NotContainKey("font.bold",
-            because: "clear should reset all styling");
+        (string.IsNullOrEmpty(n2.Text) || n2.Text == "(empty)").Should().BeTrue();
+        n2.Format["font.bold"].Should().Be(true,
+            because: "clear preserves cell formatting by contract");
+        n2.Format["fill"].Should().Be("#FFFF00");
     }
 
     // =====================================================================

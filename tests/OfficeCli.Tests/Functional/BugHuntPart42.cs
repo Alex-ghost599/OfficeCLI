@@ -202,7 +202,7 @@ public class BugHuntPart42 : IDisposable
         var node = handler.Get("/slide[1]/connector[1]");
         // At minimum, the connector node should have same line-property reporting as shapes
         // If lineColor exists, the NodeBuilder should also check for alpha on it
-        node.Format.Should().ContainKey("lineColor",
+        node.Format.Should().ContainKey("color",
             because: "connector with lineColor should report it");
     }
 
@@ -218,7 +218,6 @@ public class BugHuntPart42 : IDisposable
         BlankDocCreator.Create(path);
         using var handler = new ExcelHandler(path, editable: true);
 
-        handler.Add("/", "sheet", null, new() { ["name"] = "Sheet1" });
         handler.Add("/Sheet1", "cell", null, new()
         {
             ["ref"] = "A1", ["value"] = "false", ["type"] = "boolean"
@@ -242,7 +241,6 @@ public class BugHuntPart42 : IDisposable
         BlankDocCreator.Create(path);
         using var handler = new ExcelHandler(path, editable: true);
 
-        handler.Add("/", "sheet", null, new() { ["name"] = "Sheet1" });
         handler.Add("/Sheet1", "cell", null, new()
         {
             ["ref"] = "A1", ["value"] = "hello"
@@ -371,13 +369,13 @@ public class BugHuntPart42 : IDisposable
         });
 
         var node = handler.Get("/slide[1]/shape[1]");
-        node.Format["preset"].Should().Be("rect");
+        node.Format["geometry"].Should().Be("rect");
 
         // Change geometry via Set
         handler.Set("/slide[1]/shape[1]", new() { ["preset"] = "ellipse" });
 
         node = handler.Get("/slide[1]/shape[1]");
-        node.Format["preset"].Should().Be("ellipse",
+        node.Format["geometry"].Should().Be("ellipse",
             because: "preset geometry should be updatable via Set");
     }
 
@@ -393,7 +391,6 @@ public class BugHuntPart42 : IDisposable
         BlankDocCreator.Create(path);
         using var handler = new ExcelHandler(path, editable: true);
 
-        handler.Add("/", "sheet", null, new() { ["name"] = "Sheet1" });
         handler.Add("/Sheet1", "cell", null, new() { ["ref"] = "A1", ["value"] = "test" });
         handler.Add("/", "namedrange", null, new()
         {
@@ -456,7 +453,7 @@ public class BugHuntPart42 : IDisposable
         var node = handler.Get("/slide[1]/shape[1]");
         node.Format.Should().ContainKey("valign",
             because: "valign should be readable after Set");
-        node.Format["valign"].Should().Be("center");
+        node.Format["valign"].Should().Be("middle");
     }
 
     // =====================================================================
@@ -477,7 +474,7 @@ public class BugHuntPart42 : IDisposable
         });
 
         var node = handler.Get("/body/tbl[1]/tr[1]/tc[1]");
-        node.Format.Should().ContainKey("alignment",
+        node.Format.Should().ContainKey("align",
             because: "table cell alignment should be readable after Set");
     }
 
@@ -516,7 +513,6 @@ public class BugHuntPart42 : IDisposable
         BlankDocCreator.Create(path);
         using var handler = new ExcelHandler(path, editable: true);
 
-        handler.Add("/", "sheet", null, new() { ["name"] = "Sheet1" });
         handler.Add("/Sheet1", "cell", null, new()
         {
             ["ref"] = "A1", ["value"] = "1234.5", ["format"] = "0.00"
@@ -605,7 +601,6 @@ public class BugHuntPart42 : IDisposable
         BlankDocCreator.Create(path);
         using var handler = new ExcelHandler(path, editable: true);
 
-        handler.Add("/", "sheet", null, new() { ["name"] = "Sheet1" });
         handler.Add("/Sheet1", "cell", null, new() { ["ref"] = "A1", ["value"] = "merged" });
         handler.Add("/Sheet1", "cell", null, new() { ["ref"] = "A2", ["value"] = "" });
 
@@ -653,9 +648,9 @@ public class BugHuntPart42 : IDisposable
         });
 
         var node = handler.Get("/body/p[1]");
-        node.Format.Should().ContainKey("alignment",
+        node.Format.Should().ContainKey("align",
             because: "alignment should be set during Add");
-        node.Format["alignment"].Should().Be("right");
+        node.Format["align"].Should().Be("right");
     }
 
     // =====================================================================
@@ -740,7 +735,6 @@ public class BugHuntPart42 : IDisposable
         BlankDocCreator.Create(path);
         using var handler = new ExcelHandler(path, editable: true);
 
-        handler.Add("/", "sheet", null, new() { ["name"] = "Sheet1" });
         handler.Add("/Sheet1", "cell", null, new() { ["ref"] = "A1", ["value"] = "test" });
         handler.Add("/Sheet1", "comment", null, new()
         {

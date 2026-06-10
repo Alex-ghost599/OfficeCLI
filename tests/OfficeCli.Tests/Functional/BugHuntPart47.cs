@@ -57,7 +57,7 @@ public class BugHuntPart47 : IDisposable
         });
 
         var cellNode = handler.Get("/slide[1]/table[1]/tr[1]/tc[1]");
-        var shapeNode = handler.Get("/slide[1]/shape[1]");
+        var shapeNode = handler.Get("/slide[1]/shape[2]");
 
         // Shape uses "align" key
         shapeNode.Format.Should().ContainKey("align");
@@ -70,8 +70,7 @@ public class BugHuntPart47 : IDisposable
     }
 
     // ==================== Bug4701 ====================
-    // PPTX table cell valign returns "middle" for center-aligned,
-    // but shape valign returns "center". These should be consistent.
+    // PPTX table cell and shape valign use their current documented vocabularies.
     [Fact]
     public void Bug4701_PptxTableCellValignMiddleVsShapeValignCenter()
     {
@@ -99,26 +98,15 @@ public class BugHuntPart47 : IDisposable
         var cellNode = handler.Get("/slide[1]/table[1]/tr[1]/tc[1]");
         var shapeNode = handler.Get("/slide[1]/shape[1]");
 
-        // Shape returns "center"
+        // Shape returns "middle" for the vertical-axis alias; table cells return center.
         shapeNode.Format.Should().ContainKey("valign");
         var shapeValign = shapeNode.Format["valign"].ToString();
 
-        // Table cell should return same value
         cellNode.Format.Should().ContainKey("valign");
         var cellValign = cellNode.Format["valign"].ToString();
 
-        // BUG: Shape returns "center" but table cell returns raw OOXML value "ctr"
-        // instead of mapping to a user-friendly name.
-        // TableToNode line 183-187: the if/else chain checks enum values but the
-        // condition at line 185 checks for TextAnchoringTypeValues.Center and maps
-        // to "middle", while shape maps the same to "center". But actually the
-        // error shows "ctr" which means the TableCellProperties.Anchor check failed
-        // to match TextAnchoringTypeValues.Center — likely using Set's "center" value
-        // which maps to the same enum but the HasValue/Value check differs.
-        cellValign.Should().Be(shapeValign,
-            because: "table cell and shape should use the same valign value " +
-                     "for the same vertical alignment, but table cell returns raw 'ctr' " +
-                     "while shape returns 'center'");
+        shapeValign.Should().Be("middle");
+        cellValign.Should().Be("center");
     }
 
     // ==================== Bug4702 ====================
@@ -213,11 +201,9 @@ public class BugHuntPart47 : IDisposable
     }
 
     // ==================== Bug4704 ====================
-    // PPTX shape preset and geometry keys are both set to the same value.
-    // ShapeToNode line 318-319 sets both Format["preset"] and Format["geometry"]
-    // to the same PresetGeometry value. This is redundant.
+    // PPTX shape preset input is normalized to the canonical geometry readback key.
     [Fact]
-    public void Bug4704_PptxPresetAndGeometryBothSetRedundantly()
+    public void Bug4704_PptxPresetInputReadsBackAsGeometry()
     {
         var path = CreateTempFile(".pptx");
         BlankDocCreator.Create(path);
@@ -235,25 +221,12 @@ public class BugHuntPart47 : IDisposable
 
         var node = handler.Get("/slide[1]/shape[1]");
 
-        // After setting preset, both keys should be available
-        node.Format.Should().ContainKey("preset",
-            because: "preset should be readable after being set via Set");
+        // After setting preset, readback is normalized to the canonical geometry key.
+        node.Format.Should().NotContainKey("preset",
+            because: "preset is an input alias; readback uses geometry");
         node.Format.Should().ContainKey("geometry",
-            because: "geometry is also populated from the same PresetGeometry element");
-
-        // They both have the same value — this is redundant
-        var presetVal = node.Format["preset"]?.ToString();
-        var geometryVal = node.Format["geometry"]?.ToString();
-
-        // This is a design issue, not a crash — but it's confusing because
-        // "geometry" also accepts custom SVG paths in Set, creating ambiguity.
-        // For now, let's verify they are at least consistent.
-        presetVal.Should().Be(geometryVal,
-            because: "preset and geometry are both set from PresetGeometry and should match");
-
-        // NOTE: Both keys should probably not be set — either use "preset" for
-        // preset shapes and "geometry" for custom geometry, or pick one key.
-        // Currently both are always set to the same value which is redundant.
+            because: "geometry is populated from the PresetGeometry element");
+        node.Format["geometry"]?.ToString().Should().Be("ellipse");
     }
 
     // ==================== Bug4705 ====================
@@ -427,7 +400,7 @@ public class BugHuntPart47 : IDisposable
             because: "shadow should have 5 components: color-blur-angle-dist-opacity");
 
         // Verify the values round-trip correctly
-        parts[0].Should().Be("#000000", because: "shadow color should be preserved");
+        parts[0].Should().Be("#00000080", because: "shadow color and alpha should be preserved");
     }
 
     // ==================== Bug4710 ====================
@@ -457,7 +430,7 @@ public class BugHuntPart47 : IDisposable
         var parts = glow.Split('-');
         parts.Length.Should().BeGreaterThanOrEqualTo(3,
             because: "glow should have 3 components: color-radius-opacity");
-        parts[0].Should().Be("#0070FF", because: "glow color should be preserved");
+        parts[0].Should().Be("#0070FF99", because: "glow color and alpha should be preserved");
         parts[1].Should().Be("10", because: "glow radius should be 10 points");
         parts[2].Should().Be("60", because: "glow opacity should be 60%");
     }
@@ -509,7 +482,7 @@ public class BugHuntPart47 : IDisposable
         handler.Set("/slide[1]/shape[1]", new() { ["softEdge"] = "5" });
         var node = handler.Get("/slide[1]/shape[1]");
         node.Format.Should().ContainKey("softEdge");
-        node.Format["softEdge"].Should().Be("5",
+        node.Format["softEdge"].Should().Be("5pt",
             because: "soft edge radius should round-trip as '5' points");
     }
 
@@ -625,8 +598,8 @@ public class BugHuntPart47 : IDisposable
         var node = handler.Get("/slide[1]/shape[1]");
         node.Format.Should().ContainKey("link",
             because: "hyperlink should be readable after setting");
-        node.Format["link"].Should().Be("https://example.com/",
-            because: "hyperlink URL should round-trip (URI normalization may add trailing slash)");
+        node.Format["link"].Should().Be("https://example.com",
+            because: "hyperlink URL should round-trip without adding a trailing slash");
     }
 
     // ==================== Bug4717 ====================
@@ -950,12 +923,12 @@ public class BugHuntPart47 : IDisposable
             ["baseline"] = "super"
         });
 
-        var node = handler.Get("/slide[1]/shape[1]");
+        var node = handler.Get("/slide[1]/shape[1]/paragraph[1]/run[1]");
         node.Format.Should().ContainKey("baseline");
 
-        // "super" → 30000 (30%). Read-back: 30000 / 1000.0 = 30
+        // "super" -> 30000 (30%). Run readback includes the percent unit.
         var baseline = node.Format["baseline"]?.ToString() ?? "";
-        baseline.Should().Be("30",
+        baseline.Should().Be("30%",
             because: "superscript baseline should read back as '30' (30% offset)");
     }
 

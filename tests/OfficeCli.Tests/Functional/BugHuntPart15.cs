@@ -83,10 +83,9 @@ public class BugHuntPart15 : IDisposable
         if (para?.Children.Count > 0)
         {
             var run = para.Children[0];
-            // BUG: If "font" was iterated before "text", font was applied to old run,
-            // then "text" created a new run without the font
-            run.Format.Should().ContainKey("font",
+            run.Format.Should().ContainKey("font.latin",
                 "setting font and text together on a table cell should apply font to the final text");
+            run.Format["font.latin"].Should().Be("Courier New");
         }
     }
 
@@ -191,8 +190,7 @@ public class BugHuntPart15 : IDisposable
         var cell = pptx.Get("/slide[1]/table[1]/tr[1]/tc[1]");
         cell.Text.Should().Contain("Centered");
 
-        // BUG: The cell node Format doesn't include alignment
-        cell.Format.Should().ContainKey("alignment",
+        cell.Format.Should().ContainKey("align",
             "table cell Get should expose alignment property so Set can be verified");
     }
 
@@ -228,7 +226,7 @@ public class BugHuntPart15 : IDisposable
         var para = cell.Children.FirstOrDefault();
         if (para?.Children.Count > 0)
         {
-            para.Children[0].Format.Should().ContainKey("font",
+            para.Children[0].Format.Should().ContainKey("font.latin",
                 "font set on empty cell should be applied when text is subsequently added");
         }
     }

@@ -796,20 +796,20 @@ public class PptxEnhancementTests : IDisposable
         var para = handler.Get("/slide[1]/shape[2]/paragraph[1]");
         para.Children.Should().HaveCount(2);
         para.Children[1].Text.Should().Be("2");
-        para.Children[1].Format["baseline"].Should().Be("30");
+        para.Children[1].Format["baseline"].Should().Be("30%");
 
         // 4. Set (modify to custom value)
         handler.Set("/slide[1]/shape[2]/paragraph[1]/run[2]", new() { ["baseline"] = "40" });
 
         // 5. Get + Verify
         para = handler.Get("/slide[1]/shape[2]/paragraph[1]");
-        para.Children[1].Format["baseline"].Should().Be("40");
+        para.Children[1].Format["baseline"].Should().Be("40%");
 
         // 6. Reopen + Verify
         Reopen(ref handler);
         para = handler.Get("/slide[1]/shape[2]/paragraph[1]");
         para.Children[1].Text.Should().Be("2");
-        para.Children[1].Format["baseline"].Should().Be("40");
+        para.Children[1].Format["baseline"].Should().Be("40%");
 
         handler.Dispose();
     }
@@ -833,7 +833,7 @@ public class PptxEnhancementTests : IDisposable
         var para = handler.Get("/slide[1]/shape[2]/paragraph[1]");
         para.Children.Should().HaveCount(3);
         para.Children[1].Text.Should().Be("2");
-        para.Children[1].Format["baseline"].Should().Be("-25");
+        para.Children[1].Format["baseline"].Should().Be("-25%");
         para.Children[2].Format.Should().NotContainKey("baseline"); // O has no baseline
 
         // 4. Set (modify subscript value)
@@ -841,7 +841,7 @@ public class PptxEnhancementTests : IDisposable
 
         // 5. Get + Verify
         para = handler.Get("/slide[1]/shape[2]/paragraph[1]");
-        para.Children[1].Format["baseline"].Should().Be("-30");
+        para.Children[1].Format["baseline"].Should().Be("-30%");
 
         // 6. Set (remove baseline)
         handler.Set("/slide[1]/shape[2]/paragraph[1]/run[2]", new() { ["baseline"] = "0" });
@@ -875,19 +875,19 @@ public class PptxEnhancementTests : IDisposable
 
         // 4. Get + Verify
         var para = handler.Get("/slide[1]/shape[2]/paragraph[1]");
-        para.Children[1].Format["baseline"].Should().Be("30");
+        para.Children[1].Format["baseline"].Should().Be("30%");
 
         // 5. Set via subscript shorthand on same run
         handler.Set("/slide[1]/shape[2]/paragraph[1]/run[2]", new() { ["subscript"] = "true" });
 
         // 6. Get + Verify (now subscript)
         para = handler.Get("/slide[1]/shape[2]/paragraph[1]");
-        para.Children[1].Format["baseline"].Should().Be("-25");
+        para.Children[1].Format["baseline"].Should().Be("-25%");
 
         // 7. Reopen + Verify
         Reopen(ref handler);
         para = handler.Get("/slide[1]/shape[2]/paragraph[1]");
-        para.Children[1].Format["baseline"].Should().Be("-25");
+        para.Children[1].Format["baseline"].Should().Be("-25%");
 
         handler.Dispose();
     }

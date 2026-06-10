@@ -96,8 +96,9 @@ public class BugHuntPart23 : IDisposable
         var key = node.Format.ContainsKey("pbdr.top") ? "pbdr.top"
             : node.Format.ContainsKey("pBdr.top") ? "pBdr.top" : null;
         key.Should().NotBeNull();
-        node.Format[key!]?.ToString().Should().Contain("#00CC00",
-            "border value should include the color we set");
+        node.Format[key!]?.ToString().Should().Be("single");
+        node.Format[$"{key}.color"]?.ToString().Should().Be("#00CC00",
+            "border color should be exposed on the structured .color key");
     }
 
     // BUG: Table cols format ignores gridspan — reports cell count, not grid columns
@@ -274,7 +275,7 @@ public class BugHuntPart23 : IDisposable
             ["value"] = "Underlined", ["font.underline"] = "true"
         });
 
-        _excelHandler.Get("/Sheet1/A1").Format.Should().ContainKey("font.underline",
+        _excelHandler.Get("/Sheet1/A1").Format.Should().ContainKey("underline",
             "font.underline should be reported in Get after Set");
     }
 
@@ -336,7 +337,7 @@ public class BugHuntPart23 : IDisposable
         });
 
         _pptxHandler.Get("/slide[1]/shape[1]").Format["valign"]?.ToString()
-            .Should().Be("center", "valign should return 'center', not 'ctr'");
+            .Should().Be("middle", "valign should return the current canonical middle value");
     }
 
     // BUG: align "center" returns XML enum "ctr" instead of "center"

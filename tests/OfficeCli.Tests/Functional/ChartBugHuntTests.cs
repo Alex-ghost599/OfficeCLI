@@ -245,8 +245,8 @@ public class ChartBugHuntTests : IDisposable
         });
 
         var node = _word.Get("/chart[1]");
-        node.Format.Should().NotContainKey("legend",
-            "legend=none at Add time should result in no legend element");
+        node.Format["legend"].Should().Be("none",
+            "legend=none at Add time should read back as an explicit none state");
     }
 
     [Fact]
@@ -259,8 +259,8 @@ public class ChartBugHuntTests : IDisposable
         });
 
         var node = _excel.Get("/Sheet1/chart[1]");
-        node.Format.Should().NotContainKey("legend",
-            "legend=false at Add time should result in no legend element");
+        node.Format["legend"].Should().Be("none",
+            "legend=false at Add time should read back as an explicit none state");
     }
 
     // ==================== BUG 7: Title removal via Set ====================
@@ -299,11 +299,11 @@ public class ChartBugHuntTests : IDisposable
 
         _excel.Set("/Sheet1/chart[1]", new() { ["legend"] = "none" });
 
-        _excel.Get("/Sheet1/chart[1]").Format.Should().NotContainKey("legend",
-            "legend=none should remove the legend");
+        _excel.Get("/Sheet1/chart[1]").Format["legend"].Should().Be("none",
+            "legend=none should read back as an explicit none state");
 
         ReopenExcel();
-        _excel.Get("/Sheet1/chart[1]").Format.Should().NotContainKey("legend");
+        _excel.Get("/Sheet1/chart[1]").Format["legend"].Should().Be("none");
     }
 
     // ==================== BUG 9: Empty data edge case ====================

@@ -355,8 +355,8 @@ public partial class BugHuntTests
             // formula2 is missing but required for "between"
         });
 
-        // Should validate that formula2 is provided for "between" operator
-        act.Should().NotThrow("but creates invalid validation without formula2 for between");
+        act.Should().Throw<ArgumentException>()
+            .WithMessage("*formula2*required*between*");
     }
 
     /// Bug #325 — Excel Add: comment author ID off-by-one

@@ -74,8 +74,12 @@ public class BugHuntPart19 : IDisposable
 
         // BUG: After setting a link, the run is wrapped in a Hyperlink element,
         // but Get on the run doesn't report the link URL
-        run.Format.Should().ContainKey("link",
-            "run Get should include link URL when the run is wrapped in a hyperlink");
+        run.Format.Should().ContainKey("isHyperlink",
+            "run Get should report that the run is wrapped in a hyperlink");
+        run.Format["isHyperlink"].Should().Be(true);
+        run.Format.Should().ContainKey("url",
+            "run Get should include hyperlink URL when the run is wrapped in a hyperlink");
+        run.Format["url"].Should().Be("https://example.com");
     }
 
 

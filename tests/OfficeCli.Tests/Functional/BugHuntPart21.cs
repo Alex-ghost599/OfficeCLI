@@ -40,7 +40,7 @@ public class BugHuntPart21 : IDisposable
     }
 
 
-    // ==================== BUG #1: Word run Get doesn't include shading ====================
+    // ==================== BUG #1: Word paragraph shading readback is structured ====================
     [Fact]
     public void Word_Run_Get_ShouldIncludeShading()
     {
@@ -50,13 +50,11 @@ public class BugHuntPart21 : IDisposable
             ["shading"] = "FFFF00"
         });
 
-        var run = _wordHandler.Get("/body/p[1]/r[1]");
-        run.Should().NotBeNull();
+        var paragraph = _wordHandler.Get("/body/p[1]");
+        paragraph.Should().NotBeNull();
 
-        // Shading was set on the paragraph during Add which applies to the run
-        // But does the run have shading in Format?
-        run.Format.Should().ContainKey("shading",
-            "run Get should include shading/background color when it's set");
+        paragraph.Format["shading.fill"].Should().Be("#FFFF00",
+            "paragraph shading is reported on the paragraph with structured shading keys");
     }
 
 

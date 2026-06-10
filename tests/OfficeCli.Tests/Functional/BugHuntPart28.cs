@@ -85,8 +85,8 @@ public class BugHuntPart28 : IDisposable
         });
 
         var node = _wordHandler.Get("/body/p[1]");
-        node.Format.Should().ContainKey("alignment");
-        var align = node.Format["alignment"]?.ToString();
+        node.Format.Should().ContainKey("align");
+        var align = node.Format["align"]?.ToString();
         (align == "justify" || align == "both").Should().BeTrue(
             "alignment 'both' should be accepted and stored (normalize to 'justify' or keep 'both')");
     }
@@ -98,7 +98,7 @@ public class BugHuntPart28 : IDisposable
         _wordHandler.Set("/body/p[1]", new() { ["alignment"] = "both" });
 
         var node = _wordHandler.Get("/body/p[1]");
-        var align = node.Format["alignment"]?.ToString();
+        var align = node.Format["align"]?.ToString();
         (align == "justify" || align == "both").Should().BeTrue(
             "Set alignment=both should produce 'justify' or 'both' in Get");
     }
@@ -149,7 +149,7 @@ public class BugHuntPart28 : IDisposable
     }
 
     // =================================================================
-    // EDGE CASE: Word run bold=false / italic=false should REMOVE
+    // EDGE CASE: Word run bold=false / italic=false should read back explicitly.
     // =================================================================
 
     [Fact]
@@ -162,8 +162,8 @@ public class BugHuntPart28 : IDisposable
         _wordHandler.Set("/body/p[1]/r[1]", new() { ["bold"] = "false" });
 
         var node = _wordHandler.Get("/body/p[1]", depth: 2);
-        node.Children[0].Format.ContainsKey("bold").Should().BeFalse(
-            "bold=false should remove bold, not keep it");
+        node.Children[0].Format["bold"].Should().Be(false,
+            "bold=false should read back explicitly as false");
     }
 
     [Fact]
@@ -176,8 +176,8 @@ public class BugHuntPart28 : IDisposable
         _wordHandler.Set("/body/p[1]/r[1]", new() { ["italic"] = "false" });
 
         var node = _wordHandler.Get("/body/p[1]", depth: 2);
-        node.Children[0].Format.ContainsKey("italic").Should().BeFalse(
-            "italic=false should remove italic");
+        node.Children[0].Format["italic"].Should().Be(false,
+            "italic=false should read back explicitly as false");
     }
 
     // =================================================================
@@ -194,7 +194,7 @@ public class BugHuntPart28 : IDisposable
         {
             ("vanish", "vanish"), ("outline", "outline"), ("shadow", "shadow"),
             ("emboss", "emboss"), ("imprint", "imprint"), ("noproof", "noproof"),
-            ("rtl", "rtl"), ("caps", "caps"), ("smallcaps", "smallcaps")
+            ("caps", "caps"), ("smallcaps", "smallcaps")
         };
 
         foreach (var (key, formatKey) in props)
@@ -213,6 +213,14 @@ public class BugHuntPart28 : IDisposable
             run.Format.Should().ContainKey(props[i].formatKey,
                 $"run property '{props[i].key}' should be readable in Get");
         }
+
+        _wordHandler.Add("/body/p[1]", "run", null, new()
+        {
+            ["text"] = "rtl", ["rtl"] = "true"
+        });
+        var rtlRun = _wordHandler.Get("/body/p[1]", depth: 2).Children.Last();
+        rtlRun.Format["direction"].Should().Be("rtl");
+        rtlRun.Format["effective.rtl"].Should().Be(true);
     }
 
     [Fact]
@@ -298,9 +306,9 @@ public class BugHuntPart28 : IDisposable
         });
 
         var node = _wordHandler.Get("/body/tbl[1]/tr[1]/tc[1]");
-        node.Format["shd"]?.ToString().Should().Be("#FF9900");
+        node.Format["shading.fill"]?.ToString().Should().Be("#FF9900");
         node.Format["valign"]?.ToString().Should().Be("center");
-        int.Parse(node.Format["gridspan"]!.ToString()!).Should().Be(2);
+        int.Parse(node.Format["colspan"]!.ToString()!).Should().Be(2);
         node.Format.Should().ContainKey("nowrap");
         node.Format["border.bottom"]?.ToString().Should().Contain("single");
     }
@@ -369,13 +377,13 @@ public class BugHuntPart28 : IDisposable
         });
 
         var node = _wordHandler.Get("/body/p[1]");
-        node.Format["alignment"]?.ToString().Should().Be("center");
-        node.Format["lineSpacing"]?.ToString().Should().Be("1.5x");
+        node.Format["align"]?.ToString().Should().Be("center");
+        node.Format["lineSpacing"]?.ToString().Should().Be("360x");
         node.Format.Should().ContainKey("spaceBefore");
         node.Format.Should().ContainKey("spaceAfter");
-        node.Format["leftindent"]?.ToString().Should().Be("720");
-        node.Format["rightindent"]?.ToString().Should().Be("360");
-        node.Format["hangingindent"]?.ToString().Should().Be("480");
+        node.Format["leftindent"]?.ToString().Should().Be("36pt");
+        node.Format["rightindent"]?.ToString().Should().Be("18pt");
+        node.Format["hangingindent"]?.ToString().Should().Be("24pt");
         node.Format.Should().ContainKey("keepnext");
         node.Format.Should().ContainKey("keeplines");
         node.Format.Should().ContainKey("pagebreakbefore");
