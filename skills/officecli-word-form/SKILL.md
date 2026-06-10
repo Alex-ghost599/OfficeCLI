@@ -35,11 +35,11 @@ If the install command above fails (e.g. blocked by security policy, no network 
 
 ## Help-First Rule
 
-This skill teaches what a real form needs, not every CLI flag. When a prop / alias / enum is uncertain, consult help BEFORE guessing: `officecli help docx [element] [--json]` (e.g. `sdt`, `formfield`, `field`). Help is pinned to installed version — when this skill and help disagree, **help wins**. Every `--prop X=` below was verified against `officecli help docx <element>` on v1.0.63.
+This skill teaches what a real form needs, not every CLI flag. When a prop / alias / enum is uncertain, consult help BEFORE guessing: `officecli help docx [element] [--json]` (e.g. `sdt`, `formfield`, `field`). Help is pinned to installed version, and is authoritative for SDT/field props. Exception: in local OfficeCLI 1.0.109, legacy FormField add-time props are implemented and verified even though help under-lists them; use the FormField section below and validate readback.
 
 ## Mental Model & Inheritance
 
-A Word form is a `.docx` plus four OpenXML payload layers plain-docx skills do not touch: **`<w:sdt>`** content controls (5 types: text / richtext / dropdown / combobox / date), **`<w:ffData>`** legacy FormField (ONLY way to get a real checkbox on v1.0.63), **`<w:fldChar>`** complex fields (MERGEFIELD, REF, PAGEREF, SEQ, IF — template-time, not user-fill), and **`documentProtection`** (the lock that makes non-field text read-only in Word).
+A Word form is a `.docx` plus four OpenXML payload layers plain-docx skills do not touch: **`<w:sdt>`** content controls (text / richtext / dropdown / combobox / date), **`<w:ffData>`** legacy FormField (still the CLI path for a real checkbox in 1.0.109), **`<w:fldChar>`** complex fields (MERGEFIELD, REF, PAGEREF, SEQ, IF — template-time, not user-fill), and **`documentProtection`** (the lock that makes non-field text read-only in Word).
 
 **No inheritance from docx v2.** docx's Delivery Gate (cover-fill %, live-PAGE check) does NOT apply — form QA is `view forms` + `query sdt alias+tag` + `protectionEnforced`.
 
@@ -55,9 +55,9 @@ A Word form is a `.docx` plus four OpenXML payload layers plain-docx skills do n
 2. **Single-quote any prop containing `$`** — `"Total: $50,000"` becomes `"Total: ,000"` after `$50` variable expansion. Correct: `'Total: $50,000'`.
 3. **`--after find:<text>` uses outer single quotes, never inner double quotes** — `--after find:"Client Signature:"` makes the quotes part of the search string; match fails. Correct: `--after 'find:Client Signature:'`.
 
-**`WARNING: UNSUPPORTED` (exit 2) is a silently-wrong element.** The CLI created the element *without* the rejected prop — dropdown with no items, date with default format, SDT with no lock. Any UNSUPPORTED in your build log means your command was wrong: stop, rewrite to Path B (raw-set) or a separate `set`. Do not ship on top.
+**`WARNING: UNSUPPORTED` (exit 2) is a wrong command, even if the element was created.** Treat any UNSUPPORTED warning in the build log or batch step output as a stop condition: check `officecli help docx <element>`, then rewrite to a supported high-level prop, a separate `set`, or Path B (`raw-set`) only when the prop is not exposed.
 
-**`protection=forms` is the LAST command.** Not CLI-enforced — `add` / `set` / `raw-set` still run under any protection mode — but finishing with protection gives Word users a consistent locked experience on first open.
+**`protection=forms` is the LAST command.** After protection is saved/closed, non-field mutations require `--force`; SDT/formfield fill paths remain editable. Keeping protection last avoids accidental force usage and gives Word users a consistent locked experience on first open.
 
 ### `--after find:` micro-playbook
 
@@ -114,36 +114,41 @@ Every form must satisfy these — Delivery Gate enforces each as an executable c
 
 ## Three Paths (core decision)
 
-CLI v1.0.63 exposes exactly **four canonical props** on SDT: `{type, tag, alias, text}`. Everything else — `items`, `format`, `lock`, `placeholder`, `name`, `maxlength` — is UNSUPPORTED at add-time and silently discarded. The skill therefore splits every SDT need into three paths. **Pick the path before writing a single command.**
+OfficeCLI 1.0.109 exposes the common SDT props directly: `type`, `tag`, `alias`, `text`, `items`, `format`, `lock`, `placeholder`, `placeholderText`, `date.fullDate`, `date.calendar`, `date.lid`, `date.storeMappedDataAs`, `comboBox.lastValue`, `dropDown.lastValue`. `name` / `maxlength` are still not SDT props. The skill therefore splits uncommon OpenXML needs into three paths. **Pick the path before writing a single command.**
 
 ### Path A — Pure CLI (simple forms)
 
-**Use when**: the field only needs a label, an initial text, and a type. Acceptable if dropdown/combobox items can be empty at first and dates can default to `yyyy-MM-dd`.
+**Use when**: the field is a normal text/richtext/dropdown/combobox/date SDT, with optional items, date format, initial value, and lock. This now covers most forms.
 
 ```bash
 officecli add "$FILE" /body --type sdt \
   --prop type=text \
   --prop alias="Full Name" --prop tag=full_name \
   --prop text="Enter full name"
-# Canonical follow-ups (not on add):
-# officecli set "$FILE" '/body/sdt[N]' --prop lock=sdtlocked
-# officecli set "$FILE" / --prop protection=forms
+
+officecli add "$FILE" /body --type sdt \
+  --prop type=dropdown --prop alias="Department" --prop tag=dept \
+  --prop 'items=Engineering|ENG,Finance|FIN' --prop lock=sdtContentLocked
+
+officecli add "$FILE" /body --type sdt \
+  --prop type=date --prop alias="Start Date" --prop tag=start_date \
+  --prop format=yyyy-MM-dd --prop date.fullDate=2026-01-01T00:00:00Z
+
+officecli set "$FILE" / --prop protection=forms
 ```
 
 ### Path B — CLI + `raw-set` bridge (complex attrs)
 
-**Use when**: dropdown/combobox needs options, or date needs a non-default format. `raw-set` is OfficeCLI's universal OpenXML fallback — `officecli --help` lists it as a top-level command.
+**Use when**: the form needs something outside `officecli help docx sdt`, such as wrapping an existing static paragraph in a locked block SDT, custom XML mappings beyond the exposed date/list props, or vendor-specific form markup. `raw-set` is OfficeCLI's universal OpenXML fallback — `officecli --help` lists it as a top-level command.
 
 ```bash
-# Step 1 — Path A skeleton (generates <w:dropDownList/> automatically)
+# Standard dropdown/date/lock no longer need raw-set:
 officecli add "$FILE" /body --type sdt \
-  --prop type=dropdown --prop alias="Department" --prop tag=dept
+  --prop type=dropdown --prop alias="Department" --prop tag=dept \
+  --prop 'items=Engineering|ENG,Finance|FIN' --prop lock=sdtLocked
 
-# Step 2 — raw-set injects <w:listItem>s
-officecli raw-set "$FILE" /document \
-  --xpath "//w:sdt[w:sdtPr/w:tag/@w:val='dept']/w:sdtPr/w:dropDownList" \
-  --action append \
-  --xml '<w:listItem xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:displayText="Engineering" w:value="Engineering"/><w:listItem xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:displayText="Finance" w:value="Finance"/>'
+# Reserve raw-set for unsupported structures after checking help:
+officecli raw-set "$FILE" /document --xpath "..." --action replace --xml '<w:sdt>...</w:sdt>'
 ```
 
 ### Path C — Word template (beyond raw-set)
@@ -163,10 +168,10 @@ officecli set "$FILE" / --prop protection=forms
 
 | Need | Path | Note |
 |---|---|---|
-| text / richtext SDT with default string | **A** | four canonical props cover it |
-| text SDT that must be locked | **A + set lock** | `lock` only takes effect via `set`, not `add` |
-| dropdown / combobox **with options** | **B** | raw-set append `<w:listItem>` |
-| date SDT with non-default format | **B** | raw-set setattr `w:dateFormat/@w:val` |
+| text / richtext SDT with default string | **A** | canonical props cover it |
+| text SDT that must be locked | **A** | `lock` works on `add` and `set` in 1.0.109 |
+| dropdown / combobox **with options** | **A** | use direct `items=Display|Value,...` |
+| date SDT with non-default format | **A** | use direct `format=...` and optional `date.fullDate=...` |
 | real checkbox | **FormField** | `--type formfield --prop type=checkbox` (see §Legacy FormField) |
 | mail-merge placeholder | **MERGEFIELD** | `--type field --prop fieldType=mergefield` (see §MERGEFIELD) |
 | signature picture, grouped SDT, placeholder part | **C** | build skeleton in Word, fill via CLI |
@@ -210,63 +215,40 @@ officecli close "$FILE"
 officecli view "$FILE" forms
 ```
 
-## Path B — raw-set recipes
+## Path B — raw-set bridge (rare)
 
-Three recipes cover almost every complex-attr need on SDT forms.
-
-### B1 — Dropdown items (append)
+Do not use `raw-set` for ordinary dropdown items, combobox items, date formats, placeholder text, or locks. OfficeCLI 1.0.109 exposes those through SDT props:
 
 ```bash
-# Skeleton (Path A)
-officecli add "$FILE" /body --type sdt --prop type=dropdown \
-  --prop alias="Department" --prop tag=dept
+officecli add "$FILE" /body --type sdt \
+  --prop type=dropdown --prop alias="Department" --prop tag=dept \
+  --prop 'items=Engineering|ENG,Finance|FIN,HR|HR' --prop dropDown.lastValue=ENG
 
-# Inject items
-officecli raw-set "$FILE" /document \
-  --xpath "//w:sdt[w:sdtPr/w:tag/@w:val='dept']/w:sdtPr/w:dropDownList" \
-  --action append \
-  --xml '<w:listItem xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:displayText="Engineering" w:value="Engineering"/><w:listItem xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:displayText="Finance" w:value="Finance"/><w:listItem xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:displayText="HR" w:value="HR"/>'
+officecli add "$FILE" /body --type sdt \
+  --prop type=combobox --prop alias="Current Medication" --prop tag=current_med \
+  --prop 'items=Antihypertensives,Insulin,Other' --prop comboBox.lastValue=Other
 
-# Verify
-officecli get "$FILE" '/body/sdt[1]'   # expect: type=dropdown items=Engineering,Finance,HR
+officecli add "$FILE" /body --type sdt \
+  --prop type=date --prop alias="Contract Start Date" --prop tag=contract_start \
+  --prop format=yyyy年MM月dd日 --prop date.fullDate=2026-01-01T00:00:00Z
 ```
 
-**Template.** Swap `<TAG>` / `<LABEL>` / `<VALUE>` only. `xmlns:w=...` is required on every root `<w:listItem>` — raw-set does not inherit namespace prefixes. Chain multiple `<w:listItem>`s in one call; option order is preserved.
+Use `raw-set` only after `officecli help docx sdt` confirms the needed property is absent. Typical remaining cases:
 
-### B2 — Combobox items (same as B1, different xpath tail)
+| Need | Why raw/template is still needed |
+|---|---|
+| Wrap an existing static paragraph in a locked block SDT | High-level `add sdt` creates a new control; it does not wrap an existing paragraph |
+| Custom XML data binding beyond exposed `date.*` / list props | Requires cross-part mapping and relationship details |
+| Vendor-specific form markup | No stable high-level schema contract |
 
 ```bash
-officecli add "$FILE" /body --type sdt --prop type=combobox \
-  --prop alias="Current Medication" --prop tag=current_med
-
+# Example fallback: replace a known paragraph with a handcrafted block SDT.
+PARA_XML=$(officecli raw "$FILE" /document | awk "/w14:paraId=\"$PID\"/,/<\\/w:p>/" | tr -d '\n')
 officecli raw-set "$FILE" /document \
-  --xpath "//w:sdt[w:sdtPr/w:tag/@w:val='current_med']/w:sdtPr/w:comboBox" \
-  --action append \
-  --xml '<w:listItem xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:displayText="Antihypertensives" w:value="Antihypertensives"/><w:listItem xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:displayText="Insulin" w:value="Insulin"/><w:listItem xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:displayText="Other (specify)" w:value="Other"/>'
+  --xpath "//w:p[@w14:paraId='$PID']" \
+  --action replace \
+  --xml "<w:sdt xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:w14=\"http://schemas.microsoft.com/office/word/2010/wordml\"><w:sdtPr><w:alias w:val=\"Locked Clause\"/><w:tag w:val=\"locked_clause\"/><w:lock w:val=\"contentLocked\"/></w:sdtPr><w:sdtContent>${PARA_XML}</w:sdtContent></w:sdt>"
 ```
-
-Only difference from B1: `w:comboBox` vs `w:dropDownList` in the xpath tail. Combobox lets the user type custom input; dropdown does not.
-
-### B3 — Date format (setattr)
-
-```bash
-officecli add "$FILE" /body --type sdt --prop type=date \
-  --prop alias="Contract Start Date" --prop tag=contract_start
-
-# Chinese: yyyy年MM月dd日
-officecli raw-set "$FILE" /document \
-  --xpath "//w:sdt[w:sdtPr/w:tag/@w:val='contract_start']/w:sdtPr/w:date/w:dateFormat" \
-  --action setattr \
-  --xml "w:val=yyyy年MM月dd日"
-
-# US:    w:val=MM/dd/yyyy
-# ISO:   w:val=yyyy-MM-dd  (already the default)
-# Long:  w:val="MMMM d, yyyy"
-
-officecli get "$FILE" '/body/sdt[N]'   # expect: type=date format=yyyy年MM月dd日
-```
-
-`setattr` replaces one attribute — do not quote the value inside `--xml`. Only `w:val` is touched; the `<w:dateFormat>` wrapper is preserved.
 
 ### raw-set actions & errors
 
@@ -303,7 +285,7 @@ officecli close "$FILE"
 
 ## MERGEFIELD (data-driven track)
 
-`help docx field` on v1.0.63 declares a `fieldType` enum of ~30 values including `mergefield`, `ref`, `pageref`, `seq`, `if` — all CLI-expressible with their typed props. MERGEFIELD coexists with SDT in the same file but is reported by `query field` only; `view forms` does NOT list MERGEFIELDs (they are not user-fillable).
+`help docx field` declares a `fieldType` enum of 30+ values including `mergefield`, `ref`, `pageref`, `seq`, `if` — all CLI-expressible with their typed props. MERGEFIELD coexists with SDT in the same file but is reported by `query field` only; `view forms` does NOT list MERGEFIELDs (they are not user-fillable).
 
 **Canonical MERGEFIELD:**
 
@@ -322,7 +304,7 @@ officecli add "$FILE" '/body/p[1]' --type field --prop fieldType=mergefield --pr
 | Pattern | Call shape |
 |---|---|
 | Mail-merge placeholder | `--type field --prop fieldType=mergefield --prop name=<FieldName>` |
-| Mail-merge with numeric picture (money, percent) | `--type field --prop fieldType=mergefield --prop name=Amount --prop instr='MERGEFIELD Amount \# "#,##0.00"'`. On v1.0.63 the typed `format` prop is ignored for mergefield (prints a warning) — use `instr` (alias `instruction`) to embed the full field code. Verify: `query "$FILE" field --json \| jq '.data.results[].format.instruction'` must contain `\#` and the picture. |
+| Mail-merge with numeric picture (money, percent) | `--type field --prop fieldType=mergefield --prop name=Amount --prop instr='MERGEFIELD Amount \# "#,##0.00"'`. For mergefield picture switches, prefer `instr` (alias `instruction`) to embed the full field code. Verify: `query "$FILE" field --json \| jq '.data.results[].format.instruction'` must contain `\#` and the picture. |
 | Mail-merge with date picture | `--type field --prop fieldType=mergefield --prop name=StartDate --prop instr='MERGEFIELD StartDate \@ "yyyy-MM-dd"'` |
 | Cross-reference to bookmark text | `--type field --prop fieldType=ref --prop name=<BookmarkName>` |
 | Cross-reference to bookmark's page number | `--type field --prop fieldType=pageref --prop name=<BookmarkName>` |
@@ -331,7 +313,7 @@ officecli add "$FILE" '/body/p[1]' --type field --prop fieldType=mergefield --pr
 | "Page X of Y" | two fields: `fieldType=page` + `fieldType=numpages` |
 | Conditional text | `--type field --prop fieldType=if --prop expression='{ MERGEFIELD Gender } = "Male"' --prop trueText="Mr." --prop falseText="Ms."` |
 
-### IF conditional (CLI-expressible on v1.0.63)
+### IF conditional (CLI-expressible)
 
 ```bash
 officecli add "$FILE" /body --type paragraph --prop text=""
@@ -349,21 +331,23 @@ Nested wrappers like `{ IF { MERGEFIELD X } = "Y" { REF bm } "fallback" }` are n
 
 ## Legacy FormField
 
-Use FormField **when you need a real checkbox**. For text/dropdown, prefer SDT.
+Use FormField **when you need a real checkbox** or must interoperate with legacy Word form fields. For new text/dropdown fields, prefer SDT unless a downstream Word workflow specifically requires FormField.
 
-`help docx formfield`: `type` (text/checkbox/check/dropdown), `name` (required, **≤ 20 chars** — OpenXML schema MaxLength; add passes longer but `validate` rejects), `text` (text only, alias `value`), `checked` (checkbox only).
+`help docx formfield` publicly lists `type` (text/checkbox/check/dropdown), `name` (required, **≤ 20 chars** — OpenXML schema MaxLength; add passes longer but `validate` rejects), `text` (text only, alias `value`), and `checked` (checkbox only). Local 1.0.109 also writes and reads these add-time props even though help has not fully caught up: general `enabled`, `calcOnExit`, `entryMacro`, `exitMacro`, `helpText`, `statusText`; dropdown `items`, `default`, `result`; text `default`, `maxlength`, `texttype`, `textformat`; checkbox `checkboxsize`.
 
 ```bash
-# CHECKBOX — the only real checkbox available in v1.0.63
+# CHECKBOX — use legacy formfield; SDT checkbox is still not implemented
 officecli add "$FILE" /body --type formfield --prop type=checkbox \
   --prop name=agree_terms --prop checked=false
 
-# TEXT formfield
+# TEXT formfield with legacy text constraints
 officecli add "$FILE" /body --type formfield --prop type=text \
-  --prop name=emp_name --prop text="Enter name"
+  --prop name=emp_name --prop default="123" --prop maxlength=12 \
+  --prop texttype=number --prop textformat=0000
 
-# DROPDOWN formfield — items NOT settable via CLI; use Word template or SDT Path B
-officecli add "$FILE" /body --type formfield --prop type=dropdown --prop name=dept_select
+# DROPDOWN formfield — legacy list, use comma-separated labels
+officecli add "$FILE" /body --type formfield --prop type=dropdown \
+  --prop name=dept_select --prop items=Engineering,Finance,HR --prop result=1
 
 # Read / modify by name (stable) or 1-based index
 officecli get "$FILE" '/formfield[agree_terms]'
@@ -391,24 +375,25 @@ officecli get "$FILE" /                                  # look for: protectionE
 
 | Mode | Word user can | CLI behavior |
 |---|---|---|
-| `forms` | Fill SDT + formfield only | All ops work; no `--force` needed |
-| `readOnly` | Read only | All ops work |
-| `comments` | Add comments only | All ops work |
-| `trackedChanges` | Edit with tracked changes only | All ops work |
+| `forms` | Fill SDT + formfield only | Field paths work; non-field writes need `--force` after protection is saved |
+| `readOnly` | Read only | Non-field writes need `--force` after protection is saved |
+| `comments` | Add comments only | Non-field writes need `--force` after protection is saved |
+| `trackedChanges` | Edit with tracked changes only | Non-field writes need `--force` after protection is saved |
 | `none` | Full editing | All ops work |
 
-**KEY:** Document protection restricts **Word users**, not the CLI. You can fill / modify / lock a protected form via CLI freely. The CLI does NOT require `--force` on v1.0.63.
+**KEY:** Protection is enforced by OfficeCLI once it is persisted. If you set `protection=forms` and keep editing in the same resident before `close`, the disk-based protection gate may not see the new lock yet; do not rely on that. Put protection last, close the file, and use `--force` only for intentional non-field edits to an already-protected document.
 
-### Lock values (applied via `set`, never `add`)
+### Lock values (applied via `add` or `set`)
 
 ```bash
+officecli add "$FILE" /body --type sdt --prop type=text --prop alias=Name --prop tag=name --prop lock=sdtLocked
 officecli set "$FILE" '/body/sdt[1]' --prop lock=sdtlocked           # content editable; control cannot be deleted
 officecli set "$FILE" '/body/sdt[1]' --prop lock=contentlocked       # content read-only; control can be deleted
 officecli set "$FILE" '/body/sdt[1]' --prop lock=sdtcontentlocked    # both locked
 # Omit lock entirely → unlocked (default)
 ```
 
-`--prop lock=...` on `add` is UNSUPPORTED (silently discarded). Apply lock via a separate `set`. Readback normalises to camelCase (`sdtLocked`) regardless of input case — both accepted.
+`--prop lock=...` works on SDT `add` and `set` in 1.0.109. Readback normalises to camelCase (`sdtLocked`, `contentLocked`, `sdtContentLocked`) regardless of input case — both accepted.
 
 ### lock × `protection=forms` interaction
 
@@ -430,7 +415,7 @@ officecli add "$FILE" /body --type paragraph \
   --prop text="I authorize the above and acknowledge all clauses." --prop size=11 --prop spaceAfter=12pt
 PID=$(officecli query "$FILE" paragraph --json | jq -r '.data.results[-1].format.paraId')
 
-# v1.0.63 raw-set actions: append | prepend | insertbefore | insertafter | replace | remove | setattr
+# raw-set actions: append | prepend | insertbefore | insertafter | replace | remove | setattr
 # No `wrap` action — two-step instead: (1) insertbefore an empty <w:sdt><w:sdtContent/></w:sdt>,
 # (2) move the original <w:p> inside by `replace` on the sdtContent with a copy of the paragraph XML.
 # Simpler alternative: read the paragraph XML via `officecli raw`, then `replace` the whole <w:p> with <w:sdt>...<w:sdtContent>[original w:p]</w:sdtContent></w:sdt>:
@@ -488,29 +473,24 @@ officecli add "$FILE" '/body/p[last()]' --type field \
   --prop fieldType=mergefield --prop name=ContractNo
 ```
 
-### Recipe (sow-b) SDT fields + Path B raw-set specials
+### Recipe (sow-b) SDT fields with direct list/date props
 
-Adds the three block-level SDTs (project / date / dropdown), the inline signature SDT anchored via `--after 'find:Client Signature:'`, then Path B raw-set to inject the date format and dropdown items (both are UNSUPPORTED via `add --prop`).
+Adds the three block-level SDTs (project / date / dropdown), the inline signature SDT anchored via `--after 'find:Client Signature:'`, with date format, dropdown items, and locks set directly via SDT props.
 
 ```bash
 officecli add "$FILE" /body --type sdt --prop type=text \
   --prop alias="Project Name" --prop tag=project_name --prop text="Enter project name"
 officecli add "$FILE" /body --type sdt --prop type=date \
-  --prop alias="Contract Start Date" --prop tag=contract_start
+  --prop alias="Contract Start Date" --prop tag=contract_start \
+  --prop format=MM/dd/yyyy
 officecli add "$FILE" /body --type sdt --prop type=dropdown \
-  --prop alias="Payment Schedule" --prop tag=payment_schedule
+  --prop alias="Payment Schedule" --prop tag=payment_schedule \
+  --prop 'items=Full Prepayment,Net 30 Upon Delivery'
 officecli add "$FILE" /body --type paragraph --prop text="Client Signature:" \
   --prop bold=true --prop spaceBefore=18pt --prop spaceAfter=4pt
 officecli add "$FILE" /body --type sdt --prop type=text \
   --prop alias="Signatory Name" --prop tag=signatory_name --prop text="Authorized Signatory" \
   --after 'find:Client Signature:'
-officecli raw-set "$FILE" /document \
-  --xpath "//w:sdt[w:sdtPr/w:tag/@w:val='contract_start']/w:sdtPr/w:date/w:dateFormat" \
-  --action setattr --xml "w:val=MM/dd/yyyy"
-officecli raw-set "$FILE" /document \
-  --xpath "//w:sdt[w:sdtPr/w:tag/@w:val='payment_schedule']/w:sdtPr/w:dropDownList" \
-  --action append \
-  --xml '<w:listItem xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:displayText="Full Prepayment" w:value="Full Prepayment"/><w:listItem xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:displayText="Net 30 Upon Delivery" w:value="Net 30 Upon Delivery"/>'
 ```
 
 ### Recipe (sow-c) Watermark + locks + document protection
@@ -559,30 +539,27 @@ Short text → type=text | Long text → type=richtext | Boolean → formfield c
 
 **Signature block order.** Label on its own paragraph, SDT on the next paragraph (with `spaceBefore=18pt` on the label, `spaceAfter=4pt` on the SDT). Never `Label: SDT` inline — Word renders the runs as touching, visually stuck together.
 
-**Build order.** create+open → metadata → structure (headings, label paragraphs) → SDT/formfield skeletons (Path A 4 props) → Path B injections → per-field lock → `protection=forms` LAST → close.
+**Build order.** create+open → metadata → structure (headings, label paragraphs) → SDT/formfield controls with direct props → rare Path B raw-set fallback only if needed → per-field lock → `protection=forms` LAST → close.
 
 **Header / footer note.** Headers/footers are **predefined** when the section is created (default/first/even, 3 each). The first mutation must be `set` against the existing part, not `add` — `add $FILE /header ...` returns `already exists` or silently no-ops. Inspect first with `officecli query "$FILE" header --json` to read the `type` values, then `officecli set "$FILE" '/header[@type=default]' --prop text=...`. Only use `add` when creating an additional section with its own header/footer.
 
 ## Batch mode (brief)
 
-For forms with many controls, batch reduces overhead. Path A + Path B coexist in one batch.
+For forms with many controls, batch reduces overhead. Direct SDT/FormField props work in batch; include `raw-set` steps only for rare Path B fallbacks.
 
 ```bash
 cat <<'EOF' | officecli batch "$FILE"
 [
-  {"command":"add","parent":"/body","type":"sdt","props":{"type":"text","alias":"Full Name","tag":"full_name","text":"Enter name"}},
-  {"command":"add","parent":"/body","type":"sdt","props":{"type":"dropdown","alias":"Department","tag":"dept"}},
-  {"command":"raw-set","part":"/document","xpath":"//w:sdt[w:sdtPr/w:tag/@w:val='dept']/w:sdtPr/w:dropDownList","action":"append","xml":"<w:listItem xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" w:displayText=\"Engineering\" w:value=\"Engineering\"/><w:listItem xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" w:displayText=\"Finance\" w:value=\"Finance\"/>"},
-  {"command":"set","path":"/body/sdt[1]","props":{"lock":"sdtlocked"}},
-  {"command":"set","path":"/body/sdt[2]","props":{"lock":"sdtlocked"}}
+  {"command":"add","parent":"/body","type":"sdt","props":{"type":"text","alias":"Full Name","tag":"full_name","text":"Enter name","lock":"sdtLocked"}},
+  {"command":"add","parent":"/body","type":"sdt","props":{"type":"dropdown","alias":"Department","tag":"dept","items":"Engineering|ENG,Finance|FIN","lock":"sdtLocked"}}
 ]
 EOF
 officecli set "$FILE" / --prop protection=forms
 ```
 
-- Escape inner `"` in `xml` with `\"`. Use single-quoted heredoc `<<'EOF'` so `$var` does not expand.
-- **P0 batch trap:** unsupported props in batch are silently dropped, **no WARNING** (interactive `add` would print WARNING: UNSUPPORTED, exit 2). Defence: send only `{type, tag, alias, text}` in SDT entries; put items/format into `raw-set` entries in the same batch.
-- `batch` supports `add`, `set`, `get`, `query`, `remove`, `validate`, `raw-set` on v1.0.63.
+- Escape inner `"` in `xml` with `\"` if you include `raw-set` XML. Use single-quoted heredoc `<<'EOF'` so `$var` does not expand.
+- In 1.0.109, SDT `items`, `format`, `lock`, and `date.*` props work inside batch JSON. Still run `get '/sdt[N]' --json` or `view forms` after batch; unsupported props in any element are a build failure.
+- `batch` supports `add`, `set`, `get`, `query`, `remove`, `move`, `swap`, `view`, `raw`, `raw-set`, `validate`.
 
 ## Delivery Gate (executable)
 
@@ -612,7 +589,7 @@ TOTAL=$((SDT_N + FF_N + FLD_N))
 [ "$TOTAL" -gt 0 ] && echo "Gate 3 OK ($SDT_N sdt + $FF_N formfield + $FLD_N field)" || { echo "REJECT Gate 3: 0 structured fields — this is not a form"; exit 1; }
 
 # Gate 4 — Every SDT has alias + tag (skill-imposed H2)
-# NOTE: v1.0.63 `query --json` wraps prop fields under `.format.{prop}` — jq paths below use `.format.alias` / `.format.tag` (not bare `.alias`).
+# NOTE: `query --json` wraps prop fields under `.format.{prop}` — jq paths below use `.format.alias` / `.format.tag` (not bare `.alias`).
 SDT_MISSING=$(officecli query "$FILE" sdt --json | jq '[.data.results[] | select(.format.alias == null or .format.alias == "" or .format.tag == null or .format.tag == "")] | length')
 [ "$SDT_MISSING" -eq 0 ] && echo "Gate 4 OK (every SDT has alias+tag)" || { echo "REJECT Gate 4: $SDT_MISSING SDT(s) missing alias or tag"; exit 1; }
 
@@ -632,15 +609,15 @@ BAD_CB=$(officecli query "$FILE" sdt --json | jq '[.data.results[] | select(.for
 
 | # | Issue | Behavior | Workaround |
 |---|---|---|---|
-| K1 | SDT `type=checkbox` not implemented on v1.0.63 | `add ... --type sdt --prop type=checkbox` → `Error: SDT type 'checkbox' is not implemented`, exit 1 | Use `--type formfield --prop type=checkbox`, or Path C template |
-| K2 | SDT `items` / `format` / `lock` UNSUPPORTED on `add` | `WARNING: UNSUPPORTED props`, exit 2; element created without them | Path B `raw-set` for items/format; separate `set` for lock |
-| K3 | SDT `placeholder` / `name` / `maxlength` UNSUPPORTED | `WARNING: UNSUPPORTED`, exit 2; element still created | Use `text` for initial content; use `alias`+`tag` instead of `name`; prompt text requires Path C |
-| K4 | SDT `items` / `format` / `type` not settable after creation | `set --prop items=...` → `UNSUPPORTED props (use raw-set instead)` | Path B `raw-set`, or `remove` + re-add |
-| K5 | FormField `maxlength` UNSUPPORTED | `WARNING: UNSUPPORTED: maxlength`; formfield created | Enforce length in downstream validation |
-| K6 | FormField dropdown `items` UNSUPPORTED | Dropdown formfield is created with empty option list | Use SDT dropdown + Path B, or build in Word (Path C) |
+| K1 | SDT `type=checkbox` not implemented in 1.0.109 | `add ... --type sdt --prop type=checkbox` → `Error: SDT type 'checkbox' is not implemented`, exit 1 | Use `--type formfield --prop type=checkbox`, or Path C template |
+| K2 | SDT dropdown/date/lock props are high-level now | `items`, `format`, `lock`, `placeholder`, `date.*`, `comboBox.lastValue`, `dropDown.lastValue` are in `help docx sdt` | Use direct props first; raw-set only after help confirms the needed prop is absent |
+| K3 | SDT `name` / `maxlength` are not SDT props | `WARNING: UNSUPPORTED`, exit 2; element still created | Use `alias`+`tag` instead of `name`; enforce maxlength downstream or in template |
+| K4 | SDT `type` cannot be changed after creation | `set --prop type=...` is unsupported; type is add/get | Remove and re-add with the intended type |
+| K5 | FormField help under-lists add-time props in 1.0.109 | `help docx formfield` lists only the common public props, but local CLI accepts legacy props such as `maxlength`, `texttype`, `textformat`, `items`, `default`, `result` | Use the examples above, then verify with `get '/formfield[name]' --json` and `validate` |
+| K6 | FormField dropdown item format differs from SDT | FormField uses comma-separated labels only; SDT supports `Display|Value` pairs | Prefer SDT for new dropdowns; use FormField dropdown only for legacy Word-form compatibility |
 | K7 | Watermark `opacity` / `width` / `height` / `size` UNSUPPORTED | Watermark created without them; `get /watermark` still prints hardcoded `opacity=0.5` | Do not set them. For size, open Word + adjust shape (Phase 2) |
 | K8 | `validate` reports a `documentProtection` Schema error under `protection=forms` | Prints the error line, exits **0**. Gate 1 waives this one specific error | Confirm protection with `get $FILE /` → `protectionEnforced=True`. Known validator bug, not a document bug |
-| K9 | Batch mode silently drops UNSUPPORTED props | No `WARNING` line; batch reports "N succeeded" even when props were dropped | Pass only `{type, tag, alias, text}` in batch SDT entries; put items/format into `raw-set` entries in the same batch |
+| K9 | Batch hides interactive warnings in dense output | It can report success while you miss unsupported-prop text in logs | After batch, verify with `view forms` / `get '/sdt[N]' --json`; direct SDT `items/format/lock/date.*` are supported in 1.0.109 |
 | K13 | FormField `name` > 20 characters | `add` returns exit 0 with no warning; `validate` later reports `[Schema] ... MaxLength=20` on `/w:ffData/w:name` | Keep `name` ≤ 20 characters (OpenXML schema limit). SDT `alias` / `tag` have no such limit |
 | K14 | `shd.fill` on a paragraph emits schema-invalid `<w:pPr>/<w:shd>` | `validate` reports 2 schema errors per instance (`unexpected child element`, `required attribute 'val' missing`); Word renders it anyway | Apply highlight on the run instead (`shading=HEX`, flat canonical), or raw-set `<w:shd w:val="clear" w:fill="HEX"/>` into the run's `<w:rPr>` |
 | K15 | `view forms` does NOT list MERGEFIELDs | Only SDT + formfield in output; MERGEFIELDs are template-time, not end-user fillable | Treat `query field` and `view forms` as two disjoint inventories. Every recipe verifies both |

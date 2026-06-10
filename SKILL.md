@@ -43,6 +43,7 @@ officecli help docx                             # List all docx elements
 officecli help docx paragraph                   # Full schema: properties, aliases, examples, readbacks
 officecli help docx set paragraph               # Verb-filtered: only props usable with `set`
 officecli help docx paragraph --json            # Structured schema (machine-readable)
+officecli help all --jsonl                      # NDJSON dump for scripts / grep / diff
 ```
 
 Format aliases: `word`→`docx`, `excel`→`xlsx`, `ppt`/`powerpoint`→`pptx`. Verbs: `add`, `set`, `get`, `query`, `remove`. MCP exposes the same schema via `{"command":"help","format":"docx","type":"paragraph"}`.
@@ -97,19 +98,39 @@ officecli query <file> <selector>     # CSS-like query
 officecli validate <file>             # Validate against OpenXML schema
 ```
 
+**Command flags agents miss:**
+
+```bash
+officecli create <file> --type docx|xlsx|pptx --force
+officecli create doc.docx --locale zh-CN        # docx defaults: script fonts + RTL locales
+officecli create doc.docx --minimal             # raw OOXML scaffold, test/debug only
+officecli get <file> <path> --save out.bin      # extract picture / OLE / media payload
+officecli query <file> <selector> --find text   # post-filter matching text
+officecli import data.xlsx /Sheet1 --file data.csv --format csv --header --start-cell A1
+officecli import data.xlsx /Sheet1 --stdin < data.tsv
+officecli merge template.docx out.docx --data data.json --force
+officecli dump <file> [path] --format batch -o replay.json
+officecli refresh doc.docx                      # recalc fields; Windows + Word for docx
+officecli save <file>                           # flush active resident without closing
+```
+
+Run `officecli <cmd> --help` before using edge flags. Important current options: `view --page/--grid/-o/--render/--page-count`, `raw --start/--end/--cols`, `remove --shift left|up`, `move --to/--index/--after/--before`, `raw-set --xpath --action append|prepend|insertbefore|insertafter|replace|remove|setattr --xml`, `add-part --type chart|header|footer`, `batch --input/--commands/--stop-on-error`, `merge --data`.
+
 ### view modes
 
 | Mode | Description | Useful flags |
 |------|-------------|-------------|
 | `outline` | Document structure | |
 | `stats` | Statistics (pages, words, shapes) | |
-| `issues` | Formatting/content/structure problems | `--type format\|content\|structure`, `--limit N` |
+| `issues` | Formatting/content/structure problems | `--type format\|content\|structure` or exact subtype, `--limit N` |
 | `text` | Plain text extraction | `--start N --end N`, `--max-lines N` |
 | `annotated` | Text with formatting annotations | |
 | `html` | Static HTML snapshot — same renderer as `watch`, no server needed | `--browser`, `--page N` (docx), `--start N --end N` (pptx) |
 | `screenshot` / `svg` / `pdf` / `forms` | PNG via headless browser / SVG (pptx slide) / PDF via exporter plugin / form-fields JSON via format-handler plugin | `-o`, `--screenshot-width/-height`, pptx `--grid N` |
 
 Use `view html` for one-shot snapshots (CI artifacts, archival, diffing); use `watch` when you need live refresh or browser-side click-to-select.
+
+`view issues --type` also accepts targeted subtypes such as `formula_cache_stale`, `field_cache_stale`, `slide_field_not_evaluated`, `notes_unresolved_rid`, `chart_series_ref_missing_sheet`, `definedname_*`, and `broken_part_ref`. `chart_cache_stale` is opt-in: request that subtype explicitly when chart cache freshness matters.
 
 ### get
 
@@ -152,7 +173,7 @@ Live HTML preview that auto-refreshes on every file change. Browsers can click /
 ```bash
 officecli watch <file> [--port N]      # Start preview server (default port 26315)
 officecli unwatch <file>               # Stop
-officecli goto <file> <path>           # Scroll watching browser(s) to element (docx: p / table / tr / tc)
+officecli watch <file> goto <file> <path>  # Scroll watching browser(s) to element (docx: p / table / tr / tc)
 ```
 
 Open the printed `http://localhost:N` URL. Click to select; shift/cmd/ctrl+click to multi-select; drag from empty space to box-select. PPT/Word use blue outline; Excel uses native-style green selection (double-click cell to edit inline; drag a chart to reposition).
@@ -177,7 +198,7 @@ for p in $PATHS; do officecli set deck.pptx "$p" --prop fill=FF0000; done
 - **All connected browsers share one selection.** Last-write-wins.
 - **Same-file single-watch.** A given file can have only one watch process at a time.
 - **Group shapes select as a whole.** Drilling into individual children of a group is not supported in v1.
-- **Coverage:** `.pptx` shapes/pictures/tables/charts/connectors/groups; `.docx` top-level paragraphs and tables. Inherited layout/master decorations and Word nested elements (table cells, run-level) are not addressable. **`.xlsx` does not emit `data-path`** — `mark`/`selection` on xlsx always resolve `stale=true` (v2 candidate).
+- **Coverage:** `.pptx` shapes/pictures/tables/charts/connectors/groups; `.docx` top-level paragraphs and tables; `.xlsx` cells/rows/columns/charts. Inherited layout/master decorations, Word nested elements (table cells, run-level), and group-shape children are not directly addressable from the browser selection.
 
 ### Marks — edit proposals waiting for review
 
@@ -315,6 +336,7 @@ officecli add doc.docx '/body/p[1]' --type table --after "find:First sentence." 
 officecli move <file> <path> [--to <parent>] [--index N] [--after <path>] [--before <path>]
 officecli swap <file> <path1> <path2>
 officecli remove <file> '/body/p[4]'
+officecli remove data.xlsx /Sheet1/B5 --shift left     # Excel cell delete: left | up
 ```
 
 When using `--after` or `--before`, `--to` can be omitted — the target container is inferred from the anchor.
@@ -323,7 +345,9 @@ When using `--after` or `--before`, `--to` can be omitted — the target contain
 
 Continues on error by default (returns exit 1 if any item fails). Use `--stop-on-error` to abort on the first failure. `--force` is the docx-protection bypass.
 
-`officecli dump <file> [<path>]` emits a replayable batch JSON for round-trip — `.docx` (full coverage) and `.pptx` (text/tables/pictures/charts/notes/theme + OLE/3D/video/audio/SmartArt/morph/p15 transitions via raw-set passthrough). Path defaults to `/` (whole document); pass a subtree path (`/body`, `/body/p[N]`, `/body/tbl[N]`, `/theme`, `/settings`, `/numbering`, `/styles`) to scope the dump. `officecli refresh <file.docx>` recalculates TOC page numbers / PAGE / cross-references after replay (Word backend on Windows; headless-HTML fallback elsewhere). `officecli plugins list` extends support to `.doc`, `.hwpx`, `.pdf` export.
+`officecli dump <file> [<path>]` emits a replayable batch JSON for round-trip — `.docx` (full coverage) and `.pptx` (text/tables/pictures/charts/notes/theme + OLE/3D/video/audio/SmartArt/morph/p15 transitions via raw-set passthrough). Path defaults to `/` (whole document); pass a subtree path to scope the dump. Common docx paths: `/body`, `/body/p[N]`, `/body/tbl[N]`, `/theme`, `/settings`, `/numbering`, `/styles`. Common pptx paths: `/presentation`, `/slide[N]`, `/theme`, `/notesMaster`, `/slideMaster[N]`, `/slideLayout[N]`, `/noteSlide[N]`. Subtree dump does not automatically include every sibling resource the fragment may depend on; use whole-file dump for portable replay.
+
+`officecli refresh <file.docx>` recalculates TOC page numbers / PAGE / cross-references after replay (Word backend on Windows; headless-HTML fallback elsewhere). `officecli plugins list` extends support to `.doc`, `.hwpx`, `.pdf` export. When building plugins, use `officecli plugins lint <name> --fixture sample.ext --json` as the contract check.
 
 ```bash
 echo '[
@@ -333,9 +357,10 @@ echo '[
 
 officecli batch data.xlsx --commands '[{"op":"set","path":"/Sheet1/A1","props":{"value":"Done"}}]' --json
 officecli batch data.xlsx --input updates.json --json
+officecli batch data.xlsx --input - --stop-on-error --json < updates.json
 ```
 
-Supports: `add`, `set`, `get`, `query`, `remove`, `move`, `swap`, `view`, `raw`, `raw-set`, `validate`. Fields: `command` (or `op`), `path`, `parent`, `type`, `from`, `to`, `index`, `after`, `before`, `props`, `selector`, `mode`, `depth`, `part`, `xpath`, `action`, `xml`.
+Supports: `add`, `set`, `get`, `query`, `remove`, `move`, `swap`, `view`, `raw`, `raw-set`, `validate`. Fields: `command` (or `op`), `path`, `parent`, `type`, `from`, `to`, `index`, `after`, `before`, `props`, `selector`, `mode`, `depth`, `part`, `xpath`, `action`, `xml`. `--force` is now only a compatibility/protection bypass; default mode already continues through item errors and reports them. Use `--stop-on-error` for strict scripts.
 
 ---
 
@@ -363,7 +388,7 @@ officecli add-part <file> <parent>                   # create new document part 
 | `/shape[myname]` | Name indexing not supported. Use numeric index or `@name=` (PPT only) |
 | Guessing property names | Run `officecli help <format> <element>` to see exact names |
 | Modifying an open file | Close the file in PowerPoint/WPS first |
-| `\n` in shell strings | Use `\\n` for newlines in `--prop text="..."` |
+| `\n` / `\t` in shell props | In 1.0.109, two-character escapes become a real newline / tab. Use `\\n` only when the final text should literally contain backslash-n |
 | `$` in shell text | `--prop text="$15M"` strips `$15`. Use single quotes: `--prop text='$15M'`, or heredoc batch |
 
 ---
@@ -384,6 +409,7 @@ officecli add-part <file> <parent>                   # create new document part 
 |------|-------------|
 | `word` | Reports, letters, memos, proposals, generic documents |
 | `academic-paper` | Journal / conference / thesis: APA / Chicago / IEEE / MLA citations, equations, SEQ + PAGEREF cross-refs, multi-column journal layout, bibliography. NOT for business reports or letters (route those to `word`) |
+| `word-form` | Fillable forms, SDT content controls, legacy FormFields, MERGEFIELD templates, document protection (`protection=forms`) |
 
 ### PowerPoint (.pptx)
 

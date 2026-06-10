@@ -616,7 +616,7 @@ officecli add "$FILE" / --type slide --prop layout=blank --prop background=FFFFF
 officecli add "$FILE" "/slide[$SLIDE]" --type shape --prop text="Competitive landscape" \
   --prop x=1.5cm --prop y=1.2cm --prop width=30.87cm --prop height=2cm \
   --prop font=Georgia --prop size=36 --prop bold=true --prop color=1E2761 --prop fill=none
-# Inline table via --prop data= (confirmed on v1.0.63; per-cell r#c# rejected). Single-quote the data value — '$15/host' would strip.
+# Inline table via --prop data= is concise; per-cell r#c# props also write correctly on 1.0.109. Single-quote the data value — '$15/host' would strip.
 officecli add "$FILE" "/slide[$SLIDE]" --type table \
   --prop data='Competitor,Speed,Price,Integrations,Margin;Datadog,12 min,$15/host,680,75%;New Relic,18 min,$25/host,520,68%;Splunk,45 min,$45/GB,310,62%;You (Acme DevOps),90 sec,$8/host,1200,82%' \
   --prop style=medium1 --prop headerFill=1E2761 \
@@ -781,7 +781,7 @@ AXISMIN_HIT=$(officecli query "$FILE" 'chart' --json | jq '[.data.results[]? | s
 echo "Delivery Gate 6 PASS (token + narrative checks) — proceed to Gate 5b fresh-eyes (MANDATORY)"
 ```
 
-**Readback key note.** CLI accepts lowercase `axismin` as input (on `--prop axismin=0`) but emits camelCase `axisMin` in `query --json` on v1.0.63. The jq above accepts both for forward-compat.
+**Readback key note.** CLI accepts lowercase `axismin` as input (on `--prop axismin=0`) but emits camelCase `axisMin` in `query --json` on 1.0.109. The jq above accepts both for forward-compat.
 
 Gate 6 is a grep floor. Gate 5b is the visual ceiling. Ship only when both print PASS.
 

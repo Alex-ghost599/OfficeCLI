@@ -80,7 +80,7 @@ If any of the above fails, STOP and fix before declaring done.
 
 - Single-command footer with page number: `add / --type footer --prop field=page ...` — do NOT pass `--prop fldChar=...` or hand-compose the field. The CLI handles it.
 - First-page footer `--type footer --prop type=first --prop text=""` automatically triggers `differentFirstPage`. Do NOT `set / --prop differentFirstPage=true` separately — that prop is UNSUPPORTED and silently fails.
-- TOC add: `--type toc --prop levels="1-3" --prop hyperlinks=true --index 0`. Do NOT pass `--prop pagenumbers=true` — UNSUPPORTED (page numbers render automatically).
+- TOC add: `--type toc --prop levels="1-3" --prop hyperlinks=true --prop pageNumbers=true --index 0`. Use `pageNumbers=false` only for a no-page-number TOC.
 
 ## Common Workflow
 
@@ -271,19 +271,19 @@ When both a first-page footer and a default footer exist, the default footer is 
 
 Do NOT `set / --prop differentFirstPage=true` separately — that prop is UNSUPPORTED and silently fails. Adding a first-type footer is how you flip the bit.
 
-For composite footers like "Page X of Y" (PAGE + NUMPAGES in one paragraph), see `officecli help docx footer` and use `raw-set` with two `<w:fldChar>` field instructions — high-level single-command does not compose two fields in one run.
+For composite footers like "Page X of Y" (PAGE + NUMPAGES in one paragraph), see `officecli help docx footer`: create the footer paragraph first, then add `fieldType=page`, a literal run, and `fieldType=numpages` as child ops. A single footer add supports at most one text + one field pair.
 
 ### Table of Contents
 
 For any document with 3+ headings (Requirements):
 
 ```bash
-officecli add "$FILE" /body --type toc --prop levels="1-3" --prop title="Table of Contents" --prop hyperlinks=true --index 0
+officecli add "$FILE" /body --type toc --prop levels="1-3" --prop title="Table of Contents" --prop hyperlinks=true --prop pageNumbers=true --index 0
 ```
 
-The TOC is a live field — when a human opens the file, the viewer either populates it on open or shows it after the user recalculates (F9 in Word). Do NOT pass `--prop pagenumbers=true` — UNSUPPORTED; page numbers render automatically.
+The TOC is a live field — when a human opens the file, the viewer either populates it on open or shows it after the user recalculates (F9 in Word). `pageNumbers` is supported in 1.0.109 (`pagenumbers` alias also works); set it explicitly when the deliverable needs or forbids page numbers.
 
-**Addressing the TOC (1.0.60+).** Direct paths `/toc[1]` or `/tableofcontents` resolve to the first TOC field without hand-walking XPath — use these as the primary path for `get` / `set` / `remove`:
+**Addressing the TOC.** Direct paths `/toc[1]` or `/tableofcontents` resolve to the first TOC field without hand-walking XPath — use these as the primary path for `get` / `set` / `remove`:
 
 ```bash
 officecli get "$FILE" "/toc[1]" --depth 2            # primary path — no raw-set needed to locate
@@ -313,10 +313,16 @@ Confirm with `officecli query "$FILE" 'image:no-alt'` — output should be empty
 External links go via `hyperlink`:
 
 ```bash
-officecli add "$FILE" "/body/p[2]" --type hyperlink --prop uri="https://example.com" --prop text="our site"
+officecli add "$FILE" "/body/p[2]" --type hyperlink --prop url="https://example.com" --prop text="our site"
 ```
 
-**Internal links (to a bookmark within the document) are NOT supported by the high-level `hyperlink` command** — it rejects fragment URLs. Use `raw-set` with `<w:hyperlink w:anchor="bookmarkName">`, or pair a `PAGEREF` field with visible text. See `officecli help docx hyperlink` and `officecli help docx bookmark`.
+Internal links use the `anchor` prop and require an existing bookmark:
+
+```bash
+officecli add "$FILE" "/body/p[2]" --type hyperlink --prop anchor=section1 --prop text="see Section 1"
+```
+
+Exactly one of `url` / `href` / `link` or `anchor` / `bookmark` is required. `anchor` is add/get only; to change a link target, remove and re-add the hyperlink.
 
 ### Sections and page setup
 
@@ -434,7 +440,7 @@ officecli add "$FILE" /body --type pagebreak --index <N>
 officecli set "$FILE" "/body/p[<N+1>]" --prop pageBreakBefore=true
 ```
 
-Neither alone guarantees a break in every client. Observed on officecli 1.0.60: `pageBreakBefore` alone left 9 chapters mashed into 6 pages in one viewer; `--type pagebreak` alone has also been seen to flake, especially when the file is PDF-converted by a headless renderer. **Recommendation: prefer `pageBreakBefore=true` (more reliable across viewers) and add `--type pagebreak` as the secondary guarantee.** The redundant pair closes the gap.
+Neither alone guarantees a break in every client. Historical renderer checks found `pageBreakBefore` alone could leave chapters mashed together in one viewer; `--type pagebreak` alone has also been seen to flake, especially when the file is PDF-converted by a headless renderer. **Recommendation: prefer `pageBreakBefore=true` (more reliable across viewers) and add `--type pagebreak` as the secondary guarantee.** The redundant pair closes the gap.
 
 **`break=newPage` alias (1.0.61+).** The paragraph / section prop `--prop break=newPage` is a shorter alias that maps to `pageBreakBefore=true` (accepts `newPage | page | nextPage | pageBreak`). Same underlying XML, same behavior — so the belt-and-suspenders rule still applies: use `add --type pagebreak` before the heading AND set `pageBreakBefore=true` / `break=newPage` on the heading paragraph itself. ⚠️ `pageBreakBefore`/`break=` passed to `add` may be silently dropped — always apply it via a subsequent `set`.
 
@@ -476,9 +482,9 @@ Three tiers of precision; use the lowest that does the job.
 
 - **L1 — high-level props** (`--prop text=...`, `--prop style=Heading1`): your default. Works for 80% of cases.
 - **L2 — dotted-attr fallback** (`pbdr.top=`, `ind.left=`, `padding.top=`, `border.*`, `font.size=`, `font.color=`): when L1 lacks the exact knob. Schema-safe for most props. Example: `--prop pbdr.bottom="single;6;1F4E79;0"`. Prefer this over raw-set when the whitelist covers your need. **Two dotted props emit invalid XML today** — `shd.fill=` (missing `w:val`) and `ind.firstLine=` (placed after `w:jc` in `pPr`). Use the canonical L1 form of these instead: `shd=clear;FFFF00` and `firstLineIndent=360`. See Known Issues → Schema-invalid-on-emit.
-- **L3 — `raw-set` with XML**: last resort. Tied to OOXML knowledge; no schema protection. Use for tracked-change creation, internal hyperlinks, composite PAGE+NUMPAGES, comment `parentId`, `commentsExtended` `done=1`.
+- **L3 — `raw-set` with XML**: last resort. Tied to OOXML knowledge; no schema protection. Use for tracked-change creation, comment `parentId`, `commentsExtended` `done=1`, or structures not exposed by `officecli help docx <element>`.
 
-Borders go through the format `style;size;color;space`: `single;4;FF0000;1`. Hex colors never start with `#`: `FF0000`, not `#FF0000`. Scheme color names (`accent1..6`, `dark1`/`dark2`, `light1`/`light2`, `hyperlink`) are also accepted anywhere a hex color is (1.0.60+) — prefer hex when you need stable colors across themes.
+Borders go through the format `style;size;color;space`: `single;4;FF0000;1`. Hex colors never start with `#`: `FF0000`, not `#FF0000`. Scheme color names (`accent1..6`, `dark1`/`dark2`, `light1`/`light2`, `hyperlink`) are also accepted anywhere a hex color is — prefer hex when you need stable colors across themes.
 
 ## QA (Required)
 
@@ -649,7 +655,7 @@ Before calling a color, field, or chart broken, open the file in the user's targ
 | `listStyle` on a run | `listStyle` is a paragraph property |
 | Indent via leading spaces | Use `--prop indent=720` (twips) for left indent, `--prop firstLineIndent=360` for first line, `--prop hangingIndent=720` for hanging. Leading spaces fire `view issues`. Dotted `ind.left` works; dotted `ind.firstLine` does NOT — use canonical names |
 | Cover page number suppression via `set differentFirstPage=true` | UNSUPPORTED. Add a first-type footer instead: `--type footer --prop type=first --prop text=""` |
-| TOC `--prop pagenumbers=true` | UNSUPPORTED. Page numbers render automatically |
+| TOC page-number control | Supported: `--prop pageNumbers=true|false` (`pagenumbers` alias works). Use `false` only for no-page-number TOCs |
 | `--type pagebreak` OR `pageBreakBefore` alone not breaking across viewers | Apply BOTH: `add /body --type pagebreak` before the heading AND `set /body/p[N+1] --prop pageBreakBefore=true`. Some viewers heuristically drop either one; the pair is the only reliable recipe (see Forcing page breaks) |
 | Row-level `c1="line1\nline2"` for multi-line cell | `\n` lands as a literal. Use recipe (e): seed one bullet, then `add paragraph` to the cell for each subsequent line |
 | Raw-set when dotted-attr would work | Prefer L2 (`pbdr.top=`, `ind.left=`, `font.size=`) over L3 raw-set. `shd.fill=` and `ind.firstLine=` are NOT safe — use canonical `shd=clear;XXXXXX` and `firstLineIndent=N` |
