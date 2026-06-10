@@ -215,11 +215,23 @@ public partial class ExcelHandler
                 || addRowHidden == "1" || addRowHidden.Equals("yes", StringComparison.OrdinalIgnoreCase);
         }
 
-        // Create cells if cols specified
-        if (properties.TryGetValue("cols", out var colsStr))
+        var inferredCols = properties.Keys
+            .Select(k => Regex.Match(k, @"^c(\d+)$", RegexOptions.IgnoreCase))
+            .Where(m => m.Success)
+            .Select(m => int.Parse(m.Groups[1].Value))
+            .DefaultIfEmpty(0)
+            .Max();
+
+        // Create cells when cols is specified or cN values imply a row width.
+        if (properties.TryGetValue("cols", out var colsStr) || inferredCols > 0)
         {
-            if (!int.TryParse(colsStr, out var cols) || cols <= 0)
-                throw new ArgumentException($"Invalid 'cols' value: '{colsStr}'. Expected a positive integer (number of columns to create).");
+            var cols = inferredCols;
+            if (colsStr != null)
+            {
+                if (!int.TryParse(colsStr, out cols) || cols <= 0)
+                    throw new ArgumentException($"Invalid 'cols' value: '{colsStr}'. Expected a positive integer (number of columns to create).");
+                cols = Math.Max(cols, inferredCols);
+            }
             // CONSISTENCY(table-row-cN): pptx AddRow accepts c1=/c2=/... to
             // populate the new row's cells (PowerPointHandler.Add.Table.cs
             // L332). Mirror it here so xlsx `add row --prop cols=N c1=...`

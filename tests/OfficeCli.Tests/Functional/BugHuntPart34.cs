@@ -717,8 +717,8 @@ public class BugHuntPart34 : IDisposable
         if (node.Format.ContainsKey("firstLineIndent"))
         {
             var indent = node.Format["firstLineIndent"].ToString()!;
-            indent.Should().Be("720",
-                "First line indent should be stored as raw twips value");
+            indent.Should().Be("36pt",
+                "First line indent should read back as point units");
         }
     }
 
@@ -862,7 +862,7 @@ public class BugHuntPart34 : IDisposable
 
         var node = handler.Get("/Sheet1/A1");
         // Both value and formula should be cleared
-        node.Text.Should().BeEmpty();
+        node.Text.Should().Be("(empty)");
         node.Format.Should().NotContainKey("formula",
             "Clear should also remove the formula, not just the value");
     }

@@ -516,11 +516,9 @@ public class BugHuntPart37 : IDisposable
     }
 
     // =====================================================================
-    // Bug3715: Word Set footnote — non-text properties silently ignored
-    // The footnote Set handler only processes "text" key. All other keys
-    // (bold, color, font, etc.) are NOT added to the `unsupported` list.
-    // They are silently ignored — a data-loss bug.
-    // Code path: WordHandler.Set lines 265-287 — no default/else branch.
+    // Bug3715: Word Set footnote — format properties are supported.
+    // The current contract routes paragraph/run formatting keys to note
+    // content and reports only keys that no formatter consumes.
     // =====================================================================
     [Fact]
     public void Bug3715_Word_Set_Footnote_NonText_Props_Silently_Ignored()
@@ -535,20 +533,25 @@ public class BugHuntPart37 : IDisposable
         var unsupported = handler.Set("/footnote[1]", new()
         {
             ["bold"] = "true",
-            ["color"] = "FF0000"
+            ["color"] = "FF0000",
+            ["unknownFootnoteProp"] = "1"
         });
 
-        unsupported.Should().Contain("bold",
-            "Non-text properties in footnote Set should be reported as unsupported, " +
-            "currently they are silently ignored");
-        unsupported.Should().Contain("color",
-            "Non-text properties in footnote Set should be reported as unsupported");
+        unsupported.Should().NotContain("bold",
+            "bold is supported on footnote content");
+        unsupported.Should().NotContain("color",
+            "color is supported on footnote content");
+        unsupported.Should().Contain("unknownFootnoteProp",
+            "unknown footnote properties should still be reported");
+
+        var note = handler.Get("/footnote[1]");
+        note.Format["bold"].Should().Be(true);
+        note.Format["color"].Should().Be("#FF0000");
     }
 
     // =====================================================================
-    // Bug3716: Word Set endnote — non-text properties silently ignored
-    // Same silent-ignore bug as Bug3715 but for endnotes.
-    // Code path: WordHandler.Set lines 308-328 — no default/else branch.
+    // Bug3716: Word Set endnote — format properties are supported.
+    // Mirrors Bug3715 for endnote content.
     // =====================================================================
     [Fact]
     public void Bug3716_Word_Set_Endnote_NonText_Props_Silently_Ignored()
@@ -563,13 +566,20 @@ public class BugHuntPart37 : IDisposable
         var unsupported = handler.Set("/endnote[1]", new()
         {
             ["font"] = "Arial",
-            ["italic"] = "true"
+            ["italic"] = "true",
+            ["unknownEndnoteProp"] = "1"
         });
 
-        unsupported.Should().Contain("font",
-            "Non-text properties in endnote Set should be reported as unsupported");
-        unsupported.Should().Contain("italic",
-            "Non-text properties in endnote Set should be reported as unsupported");
+        unsupported.Should().NotContain("font",
+            "font is supported on endnote content");
+        unsupported.Should().NotContain("italic",
+            "italic is supported on endnote content");
+        unsupported.Should().Contain("unknownEndnoteProp",
+            "unknown endnote properties should still be reported");
+
+        var note = handler.Get("/endnote[1]");
+        note.Format["font"].Should().Be("Arial");
+        note.Format["italic"].Should().Be(true);
     }
 
     // =====================================================================

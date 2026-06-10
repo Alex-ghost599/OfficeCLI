@@ -454,19 +454,19 @@ public class PptxEnhancementTests : IDisposable
 
         // 3. Get + Verify
         var node = handler.Get("/slide[1]/shape[2]");
-        node.Format["softEdge"].Should().Be("3");
+        node.Format["softEdge"].Should().Be("3pt");
 
         // 4. Set (modify)
         handler.Set("/slide[1]/shape[2]", new() { ["softEdge"] = "8" });
 
         // 5. Get + Verify
         node = handler.Get("/slide[1]/shape[2]");
-        node.Format["softEdge"].Should().Be("8");
+        node.Format["softEdge"].Should().Be("8pt");
 
         // 6. Reopen + Verify
         Reopen(ref handler);
         node = handler.Get("/slide[1]/shape[2]");
-        node.Format["softEdge"].Should().Be("8");
+        node.Format["softEdge"].Should().Be("8pt");
 
         // 7. Set (remove)
         handler.Set("/slide[1]/shape[2]", new() { ["softEdge"] = "none" });
@@ -610,7 +610,7 @@ public class PptxEnhancementTests : IDisposable
 
         // 5. Get + Verify
         node = handler.Get("/slide[1]/shape[2]");
-        node.Format["bevel"].Should().Be("circle-8-8");
+        node.Format["bevel"].Should().Be("circle-8");
 
         // 6. Set (modify bevel + add bottom bevel)
         handler.Set("/slide[1]/shape[2]", new()
@@ -621,14 +621,14 @@ public class PptxEnhancementTests : IDisposable
 
         // 7. Get + Verify
         node = handler.Get("/slide[1]/shape[2]");
-        node.Format["bevel"].Should().Be("coolSlant-4-4");
-        node.Format["bevelBottom"].Should().Be("relaxedInset-3-3");
+        node.Format["bevel"].Should().Be("coolSlant-4");
+        node.Format["bevelBottom"].Should().Be("relaxedInset-3");
 
         // 8. Reopen + Verify
         Reopen(ref handler);
         node = handler.Get("/slide[1]/shape[2]");
-        node.Format["bevel"].Should().Be("coolSlant-4-4");
-        node.Format["bevelBottom"].Should().Be("relaxedInset-3-3");
+        node.Format["bevel"].Should().Be("coolSlant-4");
+        node.Format["bevelBottom"].Should().Be("relaxedInset-3");
 
         handler.Dispose();
     }
@@ -722,7 +722,7 @@ public class PptxEnhancementTests : IDisposable
 
         // 3. Get + Verify (from Add)
         var node = handler.Get("/slide[1]/shape[2]");
-        node.Format["softEdge"].Should().Be("2");
+        node.Format["softEdge"].Should().Be("2pt");
         node.Format.Should().ContainKey("bevel");
         node.Format["depth"].Should().Be("5");
 
@@ -741,11 +741,11 @@ public class PptxEnhancementTests : IDisposable
         // 5. Get + Verify
         node = handler.Get("/slide[1]/shape[2]");
         node.Format["rot3d"].Should().Be("20,10,0");
-        node.Format["bevel"].Should().Be("circle-6-6");
+        node.Format["bevel"].Should().Be("circle");
         node.Format["depth"].Should().Be("8");
         node.Format["material"].Should().Be("plastic");
         node.Format["lighting"].Should().Be("harsh");
-        node.Format["softEdge"].Should().Be("3");
+        node.Format["softEdge"].Should().Be("3pt");
         node.Format["flipH"].Should().Be(true);
 
         // 6. Set (modify subset)
@@ -759,19 +759,19 @@ public class PptxEnhancementTests : IDisposable
         node = handler.Get("/slide[1]/shape[2]");
         node.Format["rot3d"].Should().Be("30,15,5");
         node.Format["material"].Should().Be("metal");
-        node.Format["bevel"].Should().Be("circle-6-6"); // unchanged
-        node.Format["softEdge"].Should().Be("3"); // unchanged
+        node.Format["bevel"].Should().Be("circle"); // unchanged
+        node.Format["softEdge"].Should().Be("3pt"); // unchanged
         node.Format["flipH"].Should().Be(true); // unchanged
 
         // 8. Reopen + Verify persistence of all properties
         Reopen(ref handler);
         node = handler.Get("/slide[1]/shape[2]");
         node.Format["rot3d"].Should().Be("30,15,5");
-        node.Format["bevel"].Should().Be("circle-6-6");
+        node.Format["bevel"].Should().Be("circle");
         node.Format["depth"].Should().Be("8");
         node.Format["material"].Should().Be("metal");
         node.Format["lighting"].Should().Be("harsh");
-        node.Format["softEdge"].Should().Be("3");
+        node.Format["softEdge"].Should().Be("3pt");
         node.Format["flipH"].Should().Be(true);
 
         handler.Dispose();
@@ -796,20 +796,20 @@ public class PptxEnhancementTests : IDisposable
         var para = handler.Get("/slide[1]/shape[2]/paragraph[1]");
         para.Children.Should().HaveCount(2);
         para.Children[1].Text.Should().Be("2");
-        para.Children[1].Format["baseline"].Should().Be("30");
+        para.Children[1].Format["baseline"].Should().Be("30%");
 
         // 4. Set (modify to custom value)
         handler.Set("/slide[1]/shape[2]/paragraph[1]/run[2]", new() { ["baseline"] = "40" });
 
         // 5. Get + Verify
         para = handler.Get("/slide[1]/shape[2]/paragraph[1]");
-        para.Children[1].Format["baseline"].Should().Be("40");
+        para.Children[1].Format["baseline"].Should().Be("40%");
 
         // 6. Reopen + Verify
         Reopen(ref handler);
         para = handler.Get("/slide[1]/shape[2]/paragraph[1]");
         para.Children[1].Text.Should().Be("2");
-        para.Children[1].Format["baseline"].Should().Be("40");
+        para.Children[1].Format["baseline"].Should().Be("40%");
 
         handler.Dispose();
     }
@@ -833,7 +833,7 @@ public class PptxEnhancementTests : IDisposable
         var para = handler.Get("/slide[1]/shape[2]/paragraph[1]");
         para.Children.Should().HaveCount(3);
         para.Children[1].Text.Should().Be("2");
-        para.Children[1].Format["baseline"].Should().Be("-25");
+        para.Children[1].Format["baseline"].Should().Be("-25%");
         para.Children[2].Format.Should().NotContainKey("baseline"); // O has no baseline
 
         // 4. Set (modify subscript value)
@@ -841,7 +841,7 @@ public class PptxEnhancementTests : IDisposable
 
         // 5. Get + Verify
         para = handler.Get("/slide[1]/shape[2]/paragraph[1]");
-        para.Children[1].Format["baseline"].Should().Be("-30");
+        para.Children[1].Format["baseline"].Should().Be("-30%");
 
         // 6. Set (remove baseline)
         handler.Set("/slide[1]/shape[2]/paragraph[1]/run[2]", new() { ["baseline"] = "0" });
@@ -875,19 +875,19 @@ public class PptxEnhancementTests : IDisposable
 
         // 4. Get + Verify
         var para = handler.Get("/slide[1]/shape[2]/paragraph[1]");
-        para.Children[1].Format["baseline"].Should().Be("30");
+        para.Children[1].Format["baseline"].Should().Be("30%");
 
         // 5. Set via subscript shorthand on same run
         handler.Set("/slide[1]/shape[2]/paragraph[1]/run[2]", new() { ["subscript"] = "true" });
 
         // 6. Get + Verify (now subscript)
         para = handler.Get("/slide[1]/shape[2]/paragraph[1]");
-        para.Children[1].Format["baseline"].Should().Be("-25");
+        para.Children[1].Format["baseline"].Should().Be("-25%");
 
         // 7. Reopen + Verify
         Reopen(ref handler);
         para = handler.Get("/slide[1]/shape[2]/paragraph[1]");
-        para.Children[1].Format["baseline"].Should().Be("-25");
+        para.Children[1].Format["baseline"].Should().Be("-25%");
 
         handler.Dispose();
     }
@@ -1301,7 +1301,7 @@ public class PptxEnhancementTests : IDisposable
 
         // 7. Get + Verify
         node = handler.Get("/slide[1]/shape[2]");
-        node.Format["preset"].Should().Be("ellipse");
+        node.Format["geometry"].Should().Be("ellipse");
 
         handler.Dispose();
     }

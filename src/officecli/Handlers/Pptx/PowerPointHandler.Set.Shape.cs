@@ -428,6 +428,27 @@ public partial class PowerPointHandler
         return false;
     }
 
+    private static List<Drawing.Run> MaterializeEmptyTextRun(Shape shape)
+    {
+        var firstPara = shape.TextBody?.Elements<Drawing.Paragraph>().FirstOrDefault();
+        if (firstPara == null && shape.TextBody != null)
+        {
+            firstPara = new Drawing.Paragraph();
+            shape.TextBody.Append(firstPara);
+        }
+        if (firstPara == null) return new List<Drawing.Run>();
+
+        var seededRun = new Drawing.Run(
+            new Drawing.RunProperties { Language = "en-US" },
+            new Drawing.Text { Text = "" });
+        var endParaRPr = firstPara.GetFirstChild<Drawing.EndParagraphRunProperties>();
+        if (endParaRPr != null)
+            firstPara.InsertBefore(seededRun, endParaRPr);
+        else
+            firstPara.Append(seededRun);
+        return new List<Drawing.Run> { seededRun };
+    }
+
     private List<string> SetGroupByPath(Match grpMatch, Dictionary<string, string> properties)
     {
         var slideIdx = int.Parse(grpMatch.Groups[1].Value);
@@ -1104,6 +1125,11 @@ public partial class PowerPointHandler
             var shapeProps = properties
                 .Where(kv => !excludeKeys.Contains(kv.Key))
                 .ToDictionary(kv => kv.Key, kv => kv.Value);
+
+            if (allRuns.Count == 0 && shape.TextBody != null && HasRunLevelProperty(shapeProps))
+            {
+                allRuns = MaterializeEmptyTextRun(shape);
+            }
 
             var unsupported = SetRunOrShapeProperties(shapeProps, allRuns, shape, slidePart);
 

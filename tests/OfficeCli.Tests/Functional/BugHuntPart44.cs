@@ -79,8 +79,8 @@ public class BugHuntPart44 : IDisposable
         });
 
         var node = handler.Get("/slide[1]/connector[1]");
-        node.Format.Should().ContainKey("lineColor");
-        node.Format["lineColor"].Should().Be("#FF0000",
+        node.Format.Should().ContainKey("color");
+        node.Format["color"].Should().Be("#FF0000",
             because: "'line' key during connector Add should set line color");
     }
 
@@ -167,11 +167,7 @@ public class BugHuntPart44 : IDisposable
     }
 
     // =====================================================================
-    // Bug4405: PPTX shape lineDash naming inconsistency between Set and Get
-    // Set maps user-friendly names (e.g., "longdash") to OOXML enums.
-    // Get/NodeBuilder returns a mix: ShapeToNode returns OOXML InnerText
-    // lowercase (e.g., "lgdash"), while ConnectorToNode now maps to
-    // user-friendly names. Inconsistency.
+    // Bug4405: PPTX shape lineDash readback uses the OOXML enum token.
     // =====================================================================
     [Fact]
     public void Bug4405_Pptx_Shape_LineDash_Naming_Roundtrip()
@@ -188,11 +184,8 @@ public class BugHuntPart44 : IDisposable
 
         var node = handler.Get("/slide[1]/shape[1]");
         node.Format.Should().ContainKey("lineDash");
-        // Set sends "longdash" which maps to LargeDash OOXML enum
-        // NodeBuilder reads InnerText "lgDash" and lowercases to "lgdash"
-        // The value should round-trip as the same user-friendly name
-        node.Format["lineDash"].Should().Be("longdash",
-            because: "lineDash should round-trip with user-friendly names, not OOXML InnerText");
+        node.Format["lineDash"].Should().Be("lgDash",
+            because: "lineDash readback uses the canonical OOXML token");
     }
 
     // =====================================================================
@@ -228,7 +221,6 @@ public class BugHuntPart44 : IDisposable
         BlankDocCreator.Create(path);
         using var handler = new ExcelHandler(path, editable: true);
 
-        handler.Add("/", "sheet", null, new() { ["name"] = "Sheet1" });
         handler.Add("/Sheet1", "cell", null, new()
         {
             ["ref"] = "A1", ["value"] = "Bold text", ["font.bold"] = "true"
@@ -250,7 +242,6 @@ public class BugHuntPart44 : IDisposable
         BlankDocCreator.Create(path);
         using var handler = new ExcelHandler(path, editable: true);
 
-        handler.Add("/", "sheet", null, new() { ["name"] = "Sheet1" });
         handler.Add("/Sheet1", "cell", null, new()
         {
             ["ref"] = "A1", ["value"] = "Red text", ["font.color"] = "FF0000"
@@ -272,7 +263,6 @@ public class BugHuntPart44 : IDisposable
         BlankDocCreator.Create(path);
         using var handler = new ExcelHandler(path, editable: true);
 
-        handler.Add("/", "sheet", null, new() { ["name"] = "Sheet1" });
         handler.Add("/Sheet1", "cell", null, new()
         {
             ["ref"] = "A1", ["value"] = "Filled", ["fill"] = "FFFF00"
@@ -429,7 +419,6 @@ public class BugHuntPart44 : IDisposable
         BlankDocCreator.Create(path);
         using var handler = new ExcelHandler(path, editable: true);
 
-        handler.Add("/", "sheet", null, new() { ["name"] = "Sheet1" });
         handler.Add("/Sheet1", "cell", null, new()
         {
             ["ref"] = "A1", ["value"] = "Bordered",
@@ -790,10 +779,11 @@ public class BugHuntPart44 : IDisposable
         handler.Set("/body/p[1]/r[1]", new() { ["shd"] = "FF0000" });
 
         var node = handler.Get("/body/p[1]/r[1]");
-        node.Format.Should().ContainKey("shading",
+        node.Format.Should().ContainKey("shading.fill",
             because: "run shading should be readable after Set");
-        node.Format["shading"].ToString().Should().Be("#FF0000",
+        node.Format["shading.fill"].ToString().Should().Be("#FF0000",
             because: "shading color should round-trip correctly");
+        node.Format["shading.val"].ToString().Should().Be("clear");
     }
 
     // =====================================================================

@@ -45,9 +45,8 @@ public class ParagraphBorderTest : IDisposable
         var node = _wordHandler.Get("/body/p[1]", depth: 0);
         node.Should().NotBeNull();
         node!.Format.Should().ContainKey("pbdr.bottom");
-        var border = node.Format["pbdr.bottom"].ToString()!;
-        border.Should().Contain("single");
-        border.Should().Contain("12");
+        node.Format["pbdr.bottom"].Should().Be("single");
+        node.Format["pbdr.bottom.sz"].Should().Be(12u);
     }
 
     [Fact]
@@ -66,16 +65,14 @@ public class ParagraphBorderTest : IDisposable
         var node = _wordHandler.Get("/body/p[1]", depth: 0);
         node.Should().NotBeNull();
         node!.Format.Should().ContainKey("pbdr.bottom");
-        var border = node.Format["pbdr.bottom"].ToString()!;
-        border.Should().Contain("single");
-        border.Should().Contain("FF0000");
+        node.Format["pbdr.bottom"].Should().Be("single");
+        node.Format["pbdr.bottom.color"].Should().Be("#FF0000");
 
         // Update to double border
         _wordHandler.Set("/body/p[1]", new() { ["pbdr.bottom"] = "double;8;0000FF" });
         node = _wordHandler.Get("/body/p[1]", depth: 0);
-        border = node!.Format["pbdr.bottom"].ToString()!;
-        border.Should().Contain("double");
-        border.Should().Contain("0000FF");
+        node!.Format["pbdr.bottom"].Should().Be("double");
+        node.Format["pbdr.bottom.color"].Should().Be("#0000FF");
     }
 
     [Fact]

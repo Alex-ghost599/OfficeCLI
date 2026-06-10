@@ -101,7 +101,7 @@ public class BugHuntPart55 : IDisposable
         // Custom positions should be reflected with @ notation
         grad.Should().Contain("FF0000");
         grad.Should().Contain("FFFF00");
-        grad.Should().Contain("@30");
+        grad.Should().Contain("@p30000");
     }
 
     [Fact]

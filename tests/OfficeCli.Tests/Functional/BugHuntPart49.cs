@@ -172,17 +172,9 @@ public class BugHuntPart49 : IDisposable
 
         var node = handler.Get("/body/p[1]");
 
-        if (node.Format.ContainsKey("shd"))
-        {
-            var shdValue = node.Format["shd"]?.ToString() ?? "";
-            // BUG: Get returns only "FF0000" (the fill value)
-            // It should return the full "clear;FF0000;000000" or at least include pattern info
-            shdValue.Should().Contain(";",
-                because: "Word paragraph shd Get should return the full shading specification " +
-                         "including pattern and color, not just the fill value. " +
-                         "WordHandler.Navigation.cs line 269 reads only Fill?.Value, " +
-                         "discarding the Val (pattern) and Color components");
-        }
+        node.Format["shading.val"].Should().Be("clear");
+        node.Format["shading.fill"].Should().Be("#FF0000");
+        node.Format["shading.color"].Should().Be("#000000");
     }
 
     // ==================== Bug4905 ====================
@@ -253,9 +245,8 @@ public class BugHuntPart49 : IDisposable
     }
 
     // ==================== Bug4907 ====================
-    // Word table cell Set accepts "fill" as alias for "shd" (line 1111),
-    // but Get reports shading as "shd" key, not "fill". The round-trip fails
-    // because the key names differ between Set and Get.
+    // Word table cell Set accepts "fill" as alias for shading, and Get reports
+    // the structured shading keys.
     [Fact]
     public void Bug4907_WordTableCellFillKeyVsShdKey()
     {
@@ -277,16 +268,9 @@ public class BugHuntPart49 : IDisposable
 
         var cellNode = handler.Get("/body/tbl[1]/tr[1]/tc[1]", 3);
 
-        // Check what key the fill is reported under
-        var hasFill = cellNode.Format.ContainsKey("fill");
-        var hasShd = cellNode.Format.ContainsKey("shd");
-
-        // BUG: Set accepts "fill" but Get reports as "shd"
-        // For a true round-trip, if you Set with "fill", Get should return "fill"
-        hasFill.Should().BeTrue(
-            because: "Word table cell Get should include 'fill' key when shading was set via 'fill'. " +
-                     "Currently Set accepts 'fill' as alias for 'shd' (WordHandler.Set.cs line 1111) " +
-                     "but Get only reports 'shd' key (via ReadCellProps), breaking the round-trip");
+        cellNode.Format.Should().ContainKey("shading.fill");
+        cellNode.Format["shading.fill"].Should().Be("#FF0000");
+        cellNode.Format["shading.val"].Should().Be("clear");
     }
 
     // ==================== Bug4908 ====================
@@ -842,9 +826,7 @@ public class BugHuntPart49 : IDisposable
     }
 
     // ==================== Bug4925 ====================
-    // Word paragraph keepnext/keeplines Set uses IsTruthy, Get checks presence.
-    // If Set with "false", the element is set to null, so Get should not report it.
-    // But if the paragraph had keepnext originally and we Set false, verify round-trip.
+    // Word paragraph keepnext=false reads back explicitly.
     [Fact]
     public void Bug4925_WordParagraphKeepNextFalseRoundTrip()
     {
@@ -867,9 +849,8 @@ public class BugHuntPart49 : IDisposable
 
         var node2 = handler.Get("/body/p[1]");
 
-        node2.Format.ContainsKey("keepnext").Should().BeFalse(
-            because: "After setting keepnext to false, it should not appear in Format. " +
-                     "keepnext=false removes the KeepNext element, and Get only reports it when present");
+        node2.Format["keepnext"].Should().Be(false,
+            because: "After setting keepnext to false, Get should report the explicit false value");
     }
 
     // ==================== Bug4926 ====================
@@ -894,12 +875,12 @@ public class BugHuntPart49 : IDisposable
 
         var node = handler.Get("/slide[1]/connector[1]");
 
-        node.Format.Should().ContainKey("lineColor",
+        node.Format.Should().ContainKey("color",
             because: "PPTX connector Get should include lineColor when it was set");
 
-        if (node.Format.ContainsKey("lineColor"))
+        if (node.Format.ContainsKey("color"))
         {
-            node.Format["lineColor"]?.ToString().Should().Be("#FF0000",
+            node.Format["color"]?.ToString().Should().Be("#FF0000",
                 because: "Connector lineColor should round-trip: Set 'FF0000' → Get 'FF0000'");
         }
     }

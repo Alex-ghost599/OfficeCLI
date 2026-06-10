@@ -154,8 +154,8 @@ public class BugHuntPart39 : IDisposable
 
         handler.Set("/slide[1]/connector[1]", new() { ["lineColor"] = "00FF00" });
         var node = handler.Get("/slide[1]/connector[1]");
-        node.Format.Should().ContainKey("lineColor");
-        node.Format["lineColor"].Should().Be("#00FF00",
+        node.Format.Should().ContainKey("color");
+        node.Format["color"].Should().Be("#00FF00",
             because: "lineColor roundtrip should preserve the hex color");
     }
 
@@ -602,9 +602,9 @@ public class BugHuntPart39 : IDisposable
     }
 
     // =====================================================================
-    // Bug3921: Word footnote Set silently drops unknown properties
-    // WordHandler.Set.cs footnote handler only handles "text" — any other
-    // key is silently ignored (no default case to add to unsupported list)
+    // Bug3921: Word footnote Set reports truly unknown properties.
+    // Supported note-body formatting keys are applied; unrecognized keys must
+    // still flow back through the unsupported list.
     // =====================================================================
     [Fact]
     public void Bug3921_Word_Footnote_Set_Unknown_Property_Silent()
@@ -619,16 +619,23 @@ public class BugHuntPart39 : IDisposable
         var unsupported = handler.Set("/body/p[1]/footnote[1]", new()
         {
             ["text"] = "Updated footnote",
-            ["font"] = "Arial"  // This should be unsupported, not silently dropped
+            ["font"] = "Arial",
+            ["unknownFootnoteProp"] = "1"
         });
 
-        unsupported.Should().Contain("font",
-            because: "unsupported footnote properties should be reported, not silently dropped");
+        unsupported.Should().NotContain("font",
+            because: "font is supported on footnote content");
+        unsupported.Should().Contain("unknownFootnoteProp",
+            because: "unknown footnote properties should be reported, not silently dropped");
+
+        var note = handler.Get("/footnote[1]");
+        note.Text.Should().Be("Updated footnote");
+        note.Format["font"].Should().Be("Arial");
     }
 
     // =====================================================================
-    // Bug3922: Word endnote Set silently drops unknown properties
-    // Same issue as Bug3921 but for endnotes
+    // Bug3922: Word endnote Set reports truly unknown properties.
+    // Same contract as Bug3921 but for endnotes.
     // =====================================================================
     [Fact]
     public void Bug3922_Word_Endnote_Set_Unknown_Property_Silent()
@@ -643,11 +650,18 @@ public class BugHuntPart39 : IDisposable
         var unsupported = handler.Set("/body/p[1]/endnote[1]", new()
         {
             ["text"] = "Updated endnote",
-            ["bold"] = "true"  // This should be unsupported, not silently dropped
+            ["bold"] = "true",
+            ["unknownEndnoteProp"] = "1"
         });
 
-        unsupported.Should().Contain("bold",
-            because: "unsupported endnote properties should be reported, not silently dropped");
+        unsupported.Should().NotContain("bold",
+            because: "bold is supported on endnote content");
+        unsupported.Should().Contain("unknownEndnoteProp",
+            because: "unknown endnote properties should be reported, not silently dropped");
+
+        var note = handler.Get("/endnote[1]");
+        note.Text.Should().Be("Updated endnote");
+        note.Format["bold"].Should().Be(true);
     }
 
     // =====================================================================
@@ -678,8 +692,9 @@ public class BugHuntPart39 : IDisposable
         handler.Set("/namedrange[1]", new() { ["scope"] = "workbook" });
 
         var nodeAfter = handler.Get("/namedrange[1]");
-        nodeAfter.Format.Should().NotContainKey("scope",
-            because: "workbook-level scope means no LocalSheetId, so scope should not appear");
+        nodeAfter.Format.Should().ContainKey("scope");
+        nodeAfter.Format["scope"].Should().Be("workbook",
+            because: "workbook-level scope is now reported explicitly");
     }
 
     // =====================================================================

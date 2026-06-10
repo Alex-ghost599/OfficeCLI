@@ -191,7 +191,7 @@ public class BugReproTests : IDisposable
         // Should be retrievable
         var row = _excelHandler.Get("/Sheet1/row[5]");
         row.Type.Should().Be("row");
-        ((double)row.Format["height"]).Should().Be(25);
+        row.Format["height"].Should().Be("25pt");
     }
 
     // ==================== BUG 7: Excel column width Set twice on same column ====================
@@ -237,7 +237,7 @@ public class BugReproTests : IDisposable
     [Fact]
     public void Bug_StyleSet_BoldFalseRemovesBold()
     {
-        _wordHandler.Add("/body", "style", null, new()
+        _wordHandler.Add("/styles", "style", null, new()
         {
             ["name"] = "TestBold", ["id"] = "TestBold", ["bold"] = "true", ["font"] = "Arial"
         });

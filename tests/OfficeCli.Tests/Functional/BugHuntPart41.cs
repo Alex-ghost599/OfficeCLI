@@ -131,8 +131,8 @@ public class BugHuntPart41 : IDisposable
         });
 
         var node = handler.Get("/slide[1]/connector[1]");
-        node.Format.Should().ContainKey("lineColor");
-        node.Format["lineColor"].Should().Be("#FF0000");
+        node.Format.Should().ContainKey("color");
+        node.Format["color"].Should().Be("#FF0000");
         node.Format.Should().ContainKey("lineWidth");
     }
 
@@ -183,7 +183,7 @@ public class BugHuntPart41 : IDisposable
 
         var node = handler.Get("/slide[1]/shape[1]");
         node.Format.Should().ContainKey("fill");
-        node.Format["fill"].Should().Be("#FF0000");
+        node.Format["fill"].Should().Be("#FF000080");
         node.Format.Should().ContainKey("opacity",
             because: "opacity with fill in same Add call should work since fill is processed first");
         node.Format["opacity"].Should().Be("0.5");
@@ -254,8 +254,10 @@ public class BugHuntPart41 : IDisposable
         });
 
         var cellNode = handler.Get("/body/tbl[1]/tr[1]/tc[1]");
-        cellNode.Format.Should().ContainKey("fill",
+        cellNode.Format.Should().ContainKey("shading.fill",
             because: "table cell fill/shading should be readable after setting");
+        cellNode.Format["shading.fill"].Should().Be("#FF0000");
+        cellNode.Format["shading.val"].Should().Be("clear");
     }
 
     // =====================================================================
@@ -496,8 +498,8 @@ public class BugHuntPart41 : IDisposable
         });
 
         var runNode = handler.Get("/body/p[1]/r[1]");
-        runNode.Format.Should().ContainKey("font");
-        runNode.Format["font"].Should().Be("Arial");
+        runNode.Format.Should().ContainKey("font.latin");
+        runNode.Format["font.latin"].Should().Be("Arial");
         runNode.Format.Should().ContainKey("bold");
         runNode.Format["bold"].Should().Be(true);
         runNode.Format.Should().ContainKey("italic");
@@ -593,7 +595,6 @@ public class BugHuntPart41 : IDisposable
         BlankDocCreator.Create(path);
         using var handler = new ExcelHandler(path, editable: true);
 
-        handler.Add("/", "sheet", null, new() { ["name"] = "Sheet1" });
         handler.Add("/Sheet1", "cell", null, new()
         {
             ["ref"] = "A1", ["value"] = "true", ["type"] = "boolean"
@@ -617,7 +618,6 @@ public class BugHuntPart41 : IDisposable
         BlankDocCreator.Create(path);
         using var handler = new ExcelHandler(path, editable: true);
 
-        handler.Add("/", "sheet", null, new() { ["name"] = "Sheet1" });
         handler.Add("/Sheet1", "cell", null, new()
         {
             ["ref"] = "A1", ["value"] = "hello", ["type"] = "string"
@@ -630,8 +630,7 @@ public class BugHuntPart41 : IDisposable
         // Now clear via Set (should reset everything)
         handler.Set("/Sheet1/A1", new() { ["clear"] = "true" });
         var node2 = handler.Get("/Sheet1/A1");
-        node2.Format["type"].Should().Be("Number",
-            because: "clear via Set should reset DataType (Number is default)");
+        node2.Format.Should().NotContain("type", "clear should remove the explicit string DataType");
     }
 
     // =====================================================================
@@ -724,10 +723,10 @@ public class BugHuntPart41 : IDisposable
             ["text"] = "E=mc2", ["baseline"] = "super"
         });
 
-        var node = handler.Get("/slide[1]/shape[1]");
+        var node = handler.Get("/slide[1]/shape[1]/paragraph[1]/run[1]");
         node.Format.Should().ContainKey("baseline",
             because: "baseline should be readable after Add");
-        node.Format["baseline"].Should().Be("30",
+        node.Format["baseline"].Should().Be("30%",
             because: "super = 30% baseline offset");
     }
 

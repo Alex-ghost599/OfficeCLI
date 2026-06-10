@@ -259,7 +259,7 @@ public class PivotTableTests : IDisposable
         });
         _handler.Add("/Sheet1", "pivottable", null, new()
         {
-            ["source"] = "A1:D6", ["rows"] = "Product", ["values"] = "Quantity:count", ["name"] = "PT2"
+            ["source"] = "A1:D6", ["position"] = "I1", ["rows"] = "Product", ["values"] = "Quantity:count", ["name"] = "PT2"
         });
 
         var results = _handler.Query("pivottable");

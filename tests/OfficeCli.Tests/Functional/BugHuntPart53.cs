@@ -212,7 +212,7 @@ public class BugHuntPart53 : IDisposable
         var node = handler.Get("/body/p[1]");
 
         node.Format.Should().ContainKey("lineSpacing");
-        node.Format["lineSpacing"].Should().Be("1.5x");
+        node.Format["lineSpacing"].Should().Be("360x");
 
         var getKey = node.Format.Keys.FirstOrDefault(k => k.Equals("lineSpacing", StringComparison.Ordinal));
         var addKey = "lineSpacing";
@@ -806,8 +806,8 @@ public class BugHuntPart53 : IDisposable
         handler.Set("/body/p[1]/r[1]", new() { ["caps"] = "false" });
 
         node = handler.Get("/body/p[1]/r[1]");
-        node.Format.Should().NotContainKey("caps",
-            "after Set caps=false, the 'caps' key should be removed");
+        node.Format.Should().ContainKey("caps");
+        node.Format["caps"].Should().Be(false);
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -834,7 +834,8 @@ public class BugHuntPart53 : IDisposable
         handler.Set("/body/p[1]/r[1]", new() { ["smallcaps"] = "false" });
 
         node = handler.Get("/body/p[1]/r[1]");
-        node.Format.Should().NotContainKey("smallcaps");
+        node.Format.Should().ContainKey("smallcaps");
+        node.Format["smallcaps"].Should().Be(false);
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -861,7 +862,8 @@ public class BugHuntPart53 : IDisposable
         handler.Set("/body/p[1]/r[1]", new() { ["dstrike"] = "false" });
 
         node = handler.Get("/body/p[1]/r[1]");
-        node.Format.Should().NotContainKey("dstrike");
+        node.Format.Should().ContainKey("dstrike");
+        node.Format["dstrike"].Should().Be(false);
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -888,7 +890,8 @@ public class BugHuntPart53 : IDisposable
         handler.Set("/body/p[1]/r[1]", new() { ["vanish"] = "false" });
 
         node = handler.Get("/body/p[1]/r[1]");
-        node.Format.Should().NotContainKey("vanish");
+        node.Format.Should().ContainKey("vanish");
+        node.Format["vanish"].Should().Be(false);
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -1091,7 +1094,8 @@ public class BugHuntPart53 : IDisposable
         handler.Set("/body/p[1]/r[1]", new() { ["emboss"] = "false" });
 
         node = handler.Get("/body/p[1]/r[1]");
-        node.Format.Should().NotContainKey("emboss");
+        node.Format.Should().ContainKey("emboss");
+        node.Format["emboss"].Should().Be(false);
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -1118,7 +1122,8 @@ public class BugHuntPart53 : IDisposable
         handler.Set("/body/p[1]/r[1]", new() { ["imprint"] = "false" });
 
         node = handler.Get("/body/p[1]/r[1]");
-        node.Format.Should().NotContainKey("imprint");
+        node.Format.Should().ContainKey("imprint");
+        node.Format["imprint"].Should().Be(false);
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -1145,7 +1150,8 @@ public class BugHuntPart53 : IDisposable
         handler.Set("/body/p[1]/r[1]", new() { ["outline"] = "false" });
 
         node = handler.Get("/body/p[1]/r[1]");
-        node.Format.Should().NotContainKey("outline");
+        node.Format.Should().ContainKey("outline");
+        node.Format["outline"].Should().Be(false);
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -1173,7 +1179,8 @@ public class BugHuntPart53 : IDisposable
         handler.Set("/body/p[1]/r[1]", new() { ["shadow"] = "false" });
 
         node = handler.Get("/body/p[1]/r[1]");
-        node.Format.Should().NotContainKey("shadow");
+        node.Format.Should().ContainKey("shadow");
+        node.Format["shadow"].Should().Be(false);
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -1200,7 +1207,8 @@ public class BugHuntPart53 : IDisposable
         handler.Set("/body/p[1]/r[1]", new() { ["noproof"] = "false" });
 
         node = handler.Get("/body/p[1]/r[1]");
-        node.Format.Should().NotContainKey("noproof");
+        node.Format.Should().ContainKey("noproof");
+        node.Format["noproof"].Should().Be(false);
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -1221,12 +1229,17 @@ public class BugHuntPart53 : IDisposable
         handler.Set("/body/p[1]/r[1]", new() { ["rtl"] = "true" });
 
         var node = handler.Get("/body/p[1]/r[1]");
-        node.Format.Should().ContainKey("rtl");
-        node.Format["rtl"].Should().Be(true);
+        node.Format.Should().ContainKey("direction");
+        node.Format["direction"].Should().Be("rtl");
+        node.Format.Should().ContainKey("effective.rtl");
+        node.Format["effective.rtl"].Should().Be(true);
 
         handler.Set("/body/p[1]/r[1]", new() { ["rtl"] = "false" });
 
         node = handler.Get("/body/p[1]/r[1]");
-        node.Format.Should().NotContainKey("rtl");
+        node.Format.Should().ContainKey("direction");
+        node.Format["direction"].Should().Be("ltr");
+        node.Format.Should().ContainKey("effective.rtl");
+        node.Format["effective.rtl"].Should().Be(false);
     }
 }

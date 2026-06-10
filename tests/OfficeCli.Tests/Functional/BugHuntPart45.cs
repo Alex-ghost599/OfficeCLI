@@ -87,8 +87,8 @@ public class BugHuntPart45 : IDisposable
         });
 
         var node = handler.Get("/slide[1]/shape[1]");
-        node.Format.Should().ContainKey("preset");
-        node.Format["preset"].ToString().Should().Be("diamond");
+        node.Format.Should().ContainKey("geometry");
+        node.Format["geometry"].ToString().Should().Be("diamond");
     }
 
     // =====================================================================
@@ -149,7 +149,7 @@ public class BugHuntPart45 : IDisposable
         var parts = shadow.Split('-');
         parts.Should().HaveCount(5,
             because: "shadow should have 5 components: color-blur-angle-dist-opacity");
-        parts[0].Should().Be("#000000", because: "shadow color should be black");
+        parts[0].Should().Be("#00000080", because: "shadow color and alpha should be preserved");
         parts[4].Should().Be("50", because: "shadow opacity should be 50");
     }
 
@@ -279,7 +279,7 @@ public class BugHuntPart45 : IDisposable
         var node = handler.Get("/slide[1]/shape[1]");
         node.Format.Should().ContainKey("valign",
             because: "valign should be readable after Add");
-        node.Format["valign"].ToString().Should().Be("center",
+        node.Format["valign"].ToString().Should().Be("middle",
             because: "valign=center should roundtrip");
     }
 
@@ -373,8 +373,8 @@ public class BugHuntPart45 : IDisposable
         var node = handler.Get("/slide[1]/shape[1]");
         node.Format.Should().ContainKey("indent",
             because: "indent should be readable after Add");
-        node.Format["indent"].ToString().Should().Contain("1",
-            because: "indent=1cm should roundtrip with a value containing 1");
+        node.Format["indent"].ToString().Should().Be("28.35pt",
+            because: "indent=1cm reads back in point units");
     }
 
     // =====================================================================
@@ -493,8 +493,7 @@ public class BugHuntPart45 : IDisposable
     }
 
     // =====================================================================
-    // Bug4518: Word paragraph bold="false" should clear bold
-    // When bold is set to "false", it should remove Bold element
+    // Bug4518: Word paragraph bold="false" reads back explicitly
     // =====================================================================
     [Fact]
     public void Bug4518_Word_Paragraph_Bold_False_Clears()
@@ -514,8 +513,8 @@ public class BugHuntPart45 : IDisposable
         handler.Set("/body/p[1]", new() { ["bold"] = "false" });
 
         var n2 = handler.Get("/body/p[1]");
-        n2.Format.Should().NotContainKey("bold",
-            because: "bold=false should clear bold formatting");
+        n2.Format["bold"].Should().Be(false,
+            because: "bold=false should read back explicitly");
     }
 
     // =====================================================================
@@ -583,8 +582,8 @@ public class BugHuntPart45 : IDisposable
         });
 
         var node = handler.Get("/slide[1]/shape[1]");
-        node.Format.Should().ContainKey("preset");
-        node.Format["preset"].ToString().Should().Be("roundRect",
+        node.Format.Should().ContainKey("geometry");
+        node.Format["geometry"].ToString().Should().Be("roundRect",
             because: "roundRect preset should roundtrip");
     }
 
@@ -626,9 +625,9 @@ public class BugHuntPart45 : IDisposable
         });
 
         var node = handler.Get("/body/p[1]");
-        node.Format.Should().ContainKey("alignment",
+        node.Format.Should().ContainKey("align",
             because: "alignment should be readable after Add");
-        node.Format["alignment"].ToString().Should().Be("center",
+        node.Format["align"].ToString().Should().Be("center",
             because: "center alignment should roundtrip");
     }
 

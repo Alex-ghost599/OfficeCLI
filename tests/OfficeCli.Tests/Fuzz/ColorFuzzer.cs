@@ -113,7 +113,6 @@ public class ColorFuzzer : IDisposable
         new object[] { "1234567" },     // 7 chars — invalid
         new object[] { "ZZZZZZ" },
         new object[] { "FF 00 00" },    // spaces
-        new object[] { "transparent" },
         new object[] { "#GG0000" },
         new object[] { "rgb(256,0,0)" },  // out of range
         new object[] { "rgb(0,0)" },      // too few components

@@ -131,8 +131,11 @@ public partial class BugHuntTests
 
         var node = _wordHandler.Get("/body/p[1]/r[1]");
 
-        node.Format.Should().ContainKey("rtl",
-            "Get should return rtl for a run that has right-to-left set");
+        node.Format.Should().ContainKey("direction",
+            "Get should return direction for a run that has right-to-left set");
+        node.Format["direction"].Should().Be("rtl");
+        node.Format.Should().ContainKey("effective.rtl");
+        node.Format["effective.rtl"].Should().Be(true);
     }
 
     // ===========================================================================================

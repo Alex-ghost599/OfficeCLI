@@ -1379,12 +1379,18 @@ public partial class PowerPointHandler
             return union;
         }
 
+        // Strip pseudo-selectors (:contains, :empty, :no-alt) and shorthand
+        // :text before top-level combinator checks. Otherwise `shape:Find me`
+        // is misread as a descendant selector because of the space in text.
+        var selectorForCombinatorChecks = Regex.Replace(selector, @":(contains\([^)]*\)|empty|no-alt)", "");
+        selectorForCombinatorChecks = Regex.Replace(selectorForCombinatorChecks, @":(?![\[\(]).*$", "");
+
         // Unsupported CSS combinators: `+` (adjacent sibling) and `~` (general
         // sibling) silently degraded to "first-token only" because the parser
         // never looked past the leading bareword. Detect them at top level
         // (outside [] / quotes) and reject with a clear pointer — silent
         // wrong-answers are the worst failure mode for agent scripts.
-        var unsupportedCombinator = FindUnsupportedCombinator(selector);
+        var unsupportedCombinator = FindUnsupportedCombinator(selectorForCombinatorChecks);
         if (unsupportedCombinator != null)
             throw new CliException(
                 $"Unsupported combinator '{unsupportedCombinator}' in selector '{selector}'. " +
@@ -1398,7 +1404,7 @@ public partial class PowerPointHandler
         // `slide ...` is supported (ancestor scoping); anything else (e.g.
         // `chart table`) silently fell through to "match first token" and
         // returned charts. Reject explicitly.
-        var unsupportedDescendant = FindUnsupportedDescendant(selector);
+        var unsupportedDescendant = FindUnsupportedDescendant(selectorForCombinatorChecks);
         if (unsupportedDescendant != null)
             throw new CliException(
                 $"Unsupported descendant combinator in selector '{selector}': " +

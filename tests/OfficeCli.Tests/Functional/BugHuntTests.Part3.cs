@@ -173,10 +173,12 @@ public partial class BugHuntTests
         pptx.Set("/slide[1]/table[1]", new() { ["tablestyle"] = "medium3" });
         var node2 = pptx.Get("/slide[1]/table[1]");
 
-        // light3 and medium3 should produce different styles
-        // but they share the same GUID due to copy-paste error
-        (node1?.Format.TryGetValue("tableStyleId", out var id1) ?? false).Should().BeTrue();
-        (node2?.Format.TryGetValue("tableStyleId", out var id2) ?? false).Should().BeTrue();
+        // light3 and medium3 should produce different canonical style readbacks.
+        object id1 = null!;
+        object id2 = null!;
+        (node1?.Format.TryGetValue("style", out id1) ?? false).Should().BeTrue();
+        (node2?.Format.TryGetValue("style", out id2) ?? false).Should().BeTrue();
+        id1.Should().NotBe(id2);
     }
 
 
@@ -334,8 +336,7 @@ public partial class BugHuntTests
                 ["width"] = "50mm"
             });
 
-            act.Should().Throw<ArgumentException>(
-                "ParseEmu doesn't support 'mm' unit — falls through to long.Parse('50mm')");
+            act.Should().NotThrow("mm units are now supported and should not fall through to long.Parse");
         }
         finally
         {

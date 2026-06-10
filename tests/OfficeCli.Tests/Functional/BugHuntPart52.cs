@@ -686,12 +686,12 @@ public class BugHuntPart52 : IDisposable
             ["superscript"] = "true"
         });
 
-        var node = handler.Get("/slide[1]/shape[1]");
+        var node = handler.Get("/slide[1]/shape[1]/paragraph[1]/run[1]");
         node.Should().NotBeNull();
         node!.Format.Should().ContainKey("baseline",
-            because: "baseline should be readable after superscript is set during Add");
+            because: "baseline should be readable on the run after superscript is set during Add");
 
-        var baselineVal = double.Parse(node.Format["baseline"].ToString()!);
+        var baselineVal = double.Parse(node.Format["baseline"].ToString()!.TrimEnd('%'));
         baselineVal.Should().BeGreaterThan(0,
             because: "superscript should produce a positive baseline value");
     }
@@ -1020,9 +1020,10 @@ public class BugHuntPart52 : IDisposable
 
         var node = handler.Get("/slide[1]/shape[1]");
         node.Should().NotBeNull();
-        node!.Format.Should().ContainKey("align");
-        node.Format["align"].ToString().Should().Be("left",
-            because: "default text alignment should be 'left'");
+        node!.Format.Should().NotContainKey("align",
+            because: "bare align is emitted only when alignment is explicitly set");
+        node.Format.Should().NotContainKey("effective.align",
+            because: "effective align is emitted only when a cascade layer provides alignment");
     }
 
     // ==================== Word Paragraph keepNext Round-Trip ====================

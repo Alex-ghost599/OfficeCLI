@@ -303,11 +303,11 @@ public class ChartEnhancedTests : IDisposable
         _excel.Set(chartPath, new() { ["gradient"] = "FF0000-0000FF" });
 
         var node = _excel.Get(chartPath, depth: 1);
-        node.Children[0].Format["gradient"].Should().Be("true");
+        node.Children[0].Format["gradient"].Should().Be("FF0000-0000FF:0");
 
         ReopenExcel();
         var node2 = _excel.Get(chartPath, depth: 1);
-        node2.Children[0].Format["gradient"].Should().Be("true");
+        node2.Children[0].Format["gradient"].Should().Be("FF0000-0000FF:0");
     }
 
     [Fact]
@@ -317,7 +317,7 @@ public class ChartEnhancedTests : IDisposable
         _excel.Set(chartPath, new() { ["gradient"] = "FF0000-00FF00-0000FF:90" });
 
         var node = _excel.Get(chartPath, depth: 1);
-        node.Children[0].Format["gradient"].Should().Be("true");
+        node.Children[0].Format["gradient"].Should().Be("FF0000-00FF00-0000FF:90");
     }
 
     [Fact]
@@ -327,8 +327,8 @@ public class ChartEnhancedTests : IDisposable
         _excel.Set(chartPath, new() { ["gradients"] = "FF0000-0000FF;00FF00-FFFF00" });
 
         var node = _excel.Get(chartPath, depth: 1);
-        node.Children[0].Format["gradient"].Should().Be("true");
-        node.Children[1].Format["gradient"].Should().Be("true");
+        node.Children[0].Format["gradient"].Should().Be("FF0000-0000FF:0");
+        node.Children[1].Format["gradient"].Should().Be("00FF00-FFFF00:0");
     }
 
     [Fact]
@@ -338,7 +338,7 @@ public class ChartEnhancedTests : IDisposable
         _pptx.Set(chartPath, new() { ["gradient"] = "4472C4-ED7D31:45" });
 
         var node = _pptx.Get(chartPath, depth: 1);
-        node.Children[0].Format["gradient"].Should().Be("true");
+        node.Children[0].Format["gradient"].Should().Be("4472C4-ED7D31:45");
     }
 
     // ==================== #7 Secondary Axis ====================
@@ -350,11 +350,11 @@ public class ChartEnhancedTests : IDisposable
         _excel.Set(chartPath, new() { ["secondary"] = "2" });
 
         var node = _excel.Get(chartPath, depth: 0);
-        node.Format["secondaryAxis"].Should().Be("true");
+        node.Format["secondaryAxis"].Should().Be("2");
 
         ReopenExcel();
         var node2 = _excel.Get(chartPath, depth: 0);
-        node2.Format["secondaryAxis"].Should().Be("true");
+        node2.Format["secondaryAxis"].Should().Be("2");
     }
 
     [Fact]
@@ -364,7 +364,7 @@ public class ChartEnhancedTests : IDisposable
         _pptx.Set(chartPath, new() { ["secondary"] = "2" });
 
         var node = _pptx.Get(chartPath, depth: 0);
-        node.Format["secondaryAxis"].Should().Be("true");
+        node.Format["secondaryAxis"].Should().Be("2");
     }
 
     // ==================== Combined Styling ====================
@@ -420,7 +420,7 @@ public class ChartEnhancedTests : IDisposable
         });
 
         var node = _excel.Get(chartPath, depth: 1);
-        node.Children[0].Format["gradient"].Should().Be("true");
+        node.Children[0].Format["gradient"].Should().Be("4472C4-83B9E8:0");
         node.Format["dataLabels"].Should().Be("value");
         node.Format["labelPos"].Should().Be("outEnd");
     }
@@ -434,7 +434,7 @@ public class ChartEnhancedTests : IDisposable
         _excel.Set(chartPath, new() { ["secondary"] = "2" });
 
         var node = _excel.Get(chartPath, depth: 0);
-        node.Format["secondaryAxis"].Should().Be("true");
+        node.Format["secondaryAxis"].Should().Be("2");
         // Both series should still exist
         node.Format["seriesCount"].Should().BeOfType<int>().Which.Should().BeGreaterOrEqualTo(2);
     }

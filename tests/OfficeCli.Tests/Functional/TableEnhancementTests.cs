@@ -79,48 +79,48 @@ public class TableEnhancementTests : IDisposable
         // 2. Get + Verify (no gradient yet)
         var node = _wordHandler.Get("/body/tbl[1]/tr[1]/tc[1]");
         node.Text.Should().Be("Gradient Cell");
-        node.Format.Should().NotContainKey("shd");
+        node.Format.Should().NotContainKey("fill");
 
         // 3. Set gradient
         _wordHandler.Set("/body/tbl[1]/tr[1]/tc[1]", new() { ["shd"] = "gradient;FF0000;0000FF;90" });
 
         // 4. Get + Verify gradient applied
         node = _wordHandler.Get("/body/tbl[1]/tr[1]/tc[1]");
-        node.Format.Should().ContainKey("shd");
-        var shd = node.Format["shd"].ToString()!;
-        shd.Should().Contain("gradient");
-        shd.Should().Contain("#FF0000");
-        shd.Should().Contain("#0000FF");
-        shd.Should().Contain("90");
+        node.Format.Should().ContainKey("fill");
+        var fill = node.Format["fill"].ToString()!;
+        fill.Should().Contain("gradient");
+        fill.Should().Contain("#FF0000");
+        fill.Should().Contain("#0000FF");
+        fill.Should().Contain("90");
 
         // 5. Modify: change gradient to different colors
         _wordHandler.Set("/body/tbl[1]/tr[1]/tc[1]", new() { ["shd"] = "gradient;00FF00;FF00FF;180" });
 
         // 6. Get + Verify modification
         node = _wordHandler.Get("/body/tbl[1]/tr[1]/tc[1]");
-        shd = node.Format["shd"].ToString()!;
-        shd.Should().Contain("#00FF00");
-        shd.Should().Contain("#FF00FF");
-        shd.Should().Contain("180");
+        fill = node.Format["fill"].ToString()!;
+        fill.Should().Contain("#00FF00");
+        fill.Should().Contain("#FF00FF");
+        fill.Should().Contain("180");
 
         // 7. Reopen + Verify persistence
         ReopenWord();
         node = _wordHandler.Get("/body/tbl[1]/tr[1]/tc[1]");
         node.Text.Should().Be("Gradient Cell");
-        shd = node.Format["shd"].ToString()!;
-        shd.Should().Contain("gradient");
-        shd.Should().Contain("#00FF00");
-        shd.Should().Contain("#FF00FF");
+        fill = node.Format["fill"].ToString()!;
+        fill.Should().Contain("gradient");
+        fill.Should().Contain("#00FF00");
+        fill.Should().Contain("#FF00FF");
 
         // 8. Modify: override gradient with solid fill
         _wordHandler.Set("/body/tbl[1]/tr[1]/tc[1]", new() { ["shd"] = "solid;AABBCC" });
         node = _wordHandler.Get("/body/tbl[1]/tr[1]/tc[1]");
-        node.Format["shd"].ToString().Should().Be("#AABBCC");
+        node.Format["shading.fill"].ToString().Should().Be("#AABBCC");
 
         // 9. Verify solid persists
         ReopenWord();
         node = _wordHandler.Get("/body/tbl[1]/tr[1]/tc[1]");
-        node.Format["shd"].ToString().Should().Be("#AABBCC");
+        node.Format["shading.fill"].ToString().Should().Be("#AABBCC");
     }
 
     [Fact]
@@ -140,23 +140,25 @@ public class TableEnhancementTests : IDisposable
         // 4. Get + Verify gradient (format: "COLOR1-COLOR2[-angle]")
         node = _pptxHandler.Get("/slide[1]/table[1]/tr[1]/tc[1]");
         node.Format.Should().ContainKey("fill");
-        var fill = node.Format["fill"].ToString()!;
-        fill.Should().Contain("#FF0000");
-        fill.Should().Contain("#0000FF");
+        node.Format["fill"].Should().Be("gradient");
+        var gradient = node.Format["gradient"].ToString()!;
+        gradient.Should().Contain("#FF0000");
+        gradient.Should().Contain("#0000FF");
 
         // 5. Modify: change gradient colors
         _pptxHandler.Set("/slide[1]/table[1]/tr[1]/tc[1]", new() { ["fill"] = "00FF00-FF00FF" });
 
         // 6. Get + Verify modification
         node = _pptxHandler.Get("/slide[1]/table[1]/tr[1]/tc[1]");
-        fill = node.Format["fill"].ToString()!;
-        fill.Should().Contain("#00FF00");
-        fill.Should().Contain("#FF00FF");
+        gradient = node.Format["gradient"].ToString()!;
+        gradient.Should().Contain("#00FF00");
+        gradient.Should().Contain("#FF00FF");
 
         // 7. Reopen + Verify persistence
         ReopenPptx();
         node = _pptxHandler.Get("/slide[1]/table[1]/tr[1]/tc[1]");
-        node.Format["fill"].ToString().Should().Contain("-"); // gradient format: COLOR1-COLOR2
+        node.Format["fill"].Should().Be("gradient");
+        node.Format["gradient"].ToString().Should().Contain(";");
 
         // 8. Modify: override with solid fill
         _pptxHandler.Set("/slide[1]/table[1]/tr[1]/tc[1]", new() { ["fill"] = "AABBCC" });
@@ -235,36 +237,36 @@ public class TableEnhancementTests : IDisposable
 
         // 4. Get + Verify (1.5cm ≈ 851 twips)
         node = _wordHandler.Get("/body/tbl[1]/tr[1]");
-        Convert.ToUInt32(node.Format["height"]).Should().BeInRange(849, 852);
+        node.Format["height"].ToString().Should().BeOneOf("849dxa", "850dxa", "851dxa", "852dxa");
 
         // 5. Modify: change to pt unit
         _wordHandler.Set("/body/tbl[1]/tr[1]", new() { ["height"] = "36pt" });
 
         // 6. Get + Verify (36pt = 720 twips)
         node = _wordHandler.Get("/body/tbl[1]/tr[1]");
-        Convert.ToUInt32(node.Format["height"]).Should().Be(720);
+        node.Format["height"].ToString().Should().Be("720dxa");
 
         // 7. Set inch unit on row 2
         _wordHandler.Set("/body/tbl[1]/tr[2]", new() { ["height"] = "0.5in" });
         node = _wordHandler.Get("/body/tbl[1]/tr[2]");
-        Convert.ToUInt32(node.Format["height"]).Should().Be(720);
+        node.Format["height"].ToString().Should().Be("720dxa");
 
         // 8. Set exact height on row 3
         _wordHandler.Set("/body/tbl[1]/tr[3]", new() { ["height.exact"] = "1cm" });
         node = _wordHandler.Get("/body/tbl[1]/tr[3]");
-        Convert.ToUInt32(node.Format["height"]).Should().Be(567);
+        node.Format["height"].ToString().Should().Be("567dxa");
         node.Format["height.rule"].ToString().Should().Be("exact");
 
         // 9. Reopen + Verify all three rows persist
         ReopenWord();
         node = _wordHandler.Get("/body/tbl[1]/tr[1]");
-        Convert.ToUInt32(node.Format["height"]).Should().Be(720);
+        node.Format["height"].ToString().Should().Be("720dxa");
 
         node = _wordHandler.Get("/body/tbl[1]/tr[2]");
-        Convert.ToUInt32(node.Format["height"]).Should().Be(720);
+        node.Format["height"].ToString().Should().Be("720dxa");
 
         node = _wordHandler.Get("/body/tbl[1]/tr[3]");
-        Convert.ToUInt32(node.Format["height"]).Should().Be(567);
+        node.Format["height"].ToString().Should().Be("567dxa");
         node.Format["height.rule"].ToString().Should().Be("exact");
     }
 
@@ -279,7 +281,7 @@ public class TableEnhancementTests : IDisposable
 
         // 3. Get + Verify row height and cell text
         var node = _wordHandler.Get("/body/tbl[1]/tr[2]");
-        Convert.ToUInt32(node.Format["height"]).Should().Be(1134);
+        node.Format["height"].ToString().Should().Be("1134dxa");
         var cell = _wordHandler.Get("/body/tbl[1]/tr[2]/tc[1]");
         cell.Text.Should().Be("A");
 
@@ -288,18 +290,18 @@ public class TableEnhancementTests : IDisposable
 
         // 5. Get + Verify exact row
         node = _wordHandler.Get("/body/tbl[1]/tr[3]");
-        Convert.ToUInt32(node.Format["height"]).Should().Be(720);
+        node.Format["height"].ToString().Should().Be("720dxa");
         node.Format["height.rule"].ToString().Should().Be("exact");
 
         // 6. Modify the row's height
         _wordHandler.Set("/body/tbl[1]/tr[2]", new() { ["height"] = "3cm" });
         node = _wordHandler.Get("/body/tbl[1]/tr[2]");
-        Convert.ToUInt32(node.Format["height"]).Should().Be(1701);
+        node.Format["height"].ToString().Should().Be("1701dxa");
 
         // 7. Reopen + Verify persistence
         ReopenWord();
         node = _wordHandler.Get("/body/tbl[1]/tr[2]");
-        Convert.ToUInt32(node.Format["height"]).Should().Be(1701);
+        node.Format["height"].ToString().Should().Be("1701dxa");
         cell = _wordHandler.Get("/body/tbl[1]/tr[2]/tc[1]");
         cell.Text.Should().Be("A");
     }

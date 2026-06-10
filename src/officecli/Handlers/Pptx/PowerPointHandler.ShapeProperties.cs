@@ -247,7 +247,7 @@ public partial class PowerPointHandler
                     XmlTextValidator.ValidateOrThrow(value, "text");
                     // CONSISTENCY(text-escape-boundary): \n / \t resolution at
                     // CLI --prop parse; here value has real newlines/tabs.
-                    var textLines = value.Split('\n');
+                    var textLines = SplitPptTextLines(value);
                     if (runs.Count == 1 && textLines.Length == 1 && !textLines[0].Contains('\t'))
                     {
                         // Single run, single line, no tabs: just replace text
@@ -2244,7 +2244,7 @@ public partial class PowerPointHandler
                     XmlTextValidator.ValidateOrThrow(value, "text");
                     var textBody = cell.TextBody;
                     // CONSISTENCY(text-escape-boundary): see CommandBuilder.
-                    var lines = value.Split('\n');
+                    var lines = SplitPptTextLines(value);
                     if (textBody == null)
                     {
                         textBody = new Drawing.TextBody(
@@ -3389,7 +3389,7 @@ public partial class PowerPointHandler
         // CONSISTENCY(escape-sequences): both \n and \t are interpreted in text=
         // properties cross-handler; resolve here so width estimation matches what
         // PowerPoint will actually render.
-        var textLines = text.Split('\n');
+        var textLines = SplitPptTextLines(text);
         int totalLines = 0;
         foreach (var line in textLines)
         {

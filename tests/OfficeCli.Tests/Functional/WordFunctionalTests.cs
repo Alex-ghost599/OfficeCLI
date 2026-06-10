@@ -56,8 +56,8 @@ public class WordFunctionalTests : IDisposable
         var node = _handler.Get("/body/p[1]/hyperlink[1]");
         node.Type.Should().Be("hyperlink");
         node.Text.Should().Be("Click here");
-        node.Format.Should().ContainKey("link");
-        ((string)node.Format["link"]).Should().StartWith("https://first.com");
+        node.Format.Should().ContainKey("url");
+        ((string)node.Format["url"]).Should().StartWith("https://first.com");
 
         // 3. Verify paragraph text contains link text
         var para = _handler.Get("/body/p[1]");
@@ -70,7 +70,7 @@ public class WordFunctionalTests : IDisposable
         // 5. Set (update URL via run) + Verify
         _handler.Set("/body/p[1]/r[1]", new Dictionary<string, string> { ["link"] = "https://updated.com" });
         node = _handler.Get("/body/p[1]/hyperlink[1]");
-        ((string)node.Format["link"]).Should().StartWith("https://updated.com");
+        ((string)node.Format["url"]).Should().StartWith("https://updated.com");
     }
 
     // ==================== DOCX Numbering / Lists ====================
@@ -364,8 +364,8 @@ public class WordFunctionalTests : IDisposable
         var handler2 = Reopen();
         var node = handler2.Get("/body/p[1]/hyperlink[1]");
         node.Text.Should().Be("My link");
-        node.Format.Should().ContainKey("link");
-        ((string)node.Format["link"]).Should().StartWith("https://persist.com");
+        node.Format.Should().ContainKey("url");
+        ((string)node.Format["url"]).Should().StartWith("https://persist.com");
     }
 
     // ==================== Table Row Add Lifecycle ====================
@@ -501,26 +501,32 @@ public class WordFunctionalTests : IDisposable
 
         // 2. Get table + verify borders
         var tbl = _handler.Get("/body/tbl[1]");
-        tbl.Format["border.top"].Should().Be("double;6;#FF0000");
-        tbl.Format["border.bottom"].Should().Be("double;6;#FF0000");
-        tbl.Format["border.left"].Should().Be("double;6;#FF0000");
-        tbl.Format["border.right"].Should().Be("double;6;#FF0000");
-        tbl.Format["border.insideH"].Should().Be("double;6;#FF0000");
-        tbl.Format["border.insideV"].Should().Be("double;6;#FF0000");
+        tbl.Format["border.top"].Should().Be("double");
+        tbl.Format["border.top.sz"].Should().Be(6u);
+        tbl.Format["border.top.color"].Should().Be("#FF0000");
+        tbl.Format["border.bottom"].Should().Be("double");
+        tbl.Format["border.left"].Should().Be("double");
+        tbl.Format["border.right"].Should().Be("double");
+        tbl.Format["border.insideH"].Should().Be("double");
+        tbl.Format["border.insideV"].Should().Be("double");
 
         // 3. Set — change table borders
         _handler.Set("/body/tbl[1]", new() { ["border.top"] = "thick;12;0000FF", ["border.insideV"] = "none" });
 
         // 4. Get + Verify updated
         tbl = _handler.Get("/body/tbl[1]");
-        tbl.Format["border.top"].Should().Be("thick;12;#0000FF");
-        tbl.Format["border.insideV"].Should().Be("none;4");
+        tbl.Format["border.top"].Should().Be("thick");
+        tbl.Format["border.top.sz"].Should().Be(12u);
+        tbl.Format["border.top.color"].Should().Be("#0000FF");
+        tbl.Format["border.insideV"].Should().Be("none");
 
         // 5. Persistence
         Reopen();
         tbl = _handler.Get("/body/tbl[1]");
-        tbl.Format["border.top"].Should().Be("thick;12;#0000FF");
-        tbl.Format["border.bottom"].Should().Be("double;6;#FF0000");
+        tbl.Format["border.top"].Should().Be("thick");
+        tbl.Format["border.top.color"].Should().Be("#0000FF");
+        tbl.Format["border.bottom"].Should().Be("double");
+        tbl.Format["border.bottom.color"].Should().Be("#FF0000");
     }
 
     [Fact]
@@ -539,24 +545,31 @@ public class WordFunctionalTests : IDisposable
         // 3. Get cell + verify borders
         var cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
         cell.Text.Should().Be("Bordered");
-        cell.Format["border.top"].Should().Be("dashed;4;#00FF00");
-        cell.Format["border.bottom"].Should().Be("dashed;4;#00FF00");
-        cell.Format["border.left"].Should().Be("dashed;4;#00FF00");
-        cell.Format["border.right"].Should().Be("dashed;4;#00FF00");
+        cell.Format["border.top"].Should().Be("dashed");
+        cell.Format["border.top.sz"].Should().Be(4u);
+        cell.Format["border.top.color"].Should().Be("#00FF00");
+        cell.Format["border.bottom"].Should().Be("dashed");
+        cell.Format["border.left"].Should().Be("dashed");
+        cell.Format["border.right"].Should().Be("dashed");
 
         // 4. Modify single side
         _handler.Set("/body/tbl[1]/tr[1]/tc[1]", new() { ["border.bottom"] = "thick;12;FF0000" });
 
         // 5. Get + Verify
         cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
-        cell.Format["border.top"].Should().Be("dashed;4;#00FF00");
-        cell.Format["border.bottom"].Should().Be("thick;12;#FF0000");
+        cell.Format["border.top"].Should().Be("dashed");
+        cell.Format["border.top.color"].Should().Be("#00FF00");
+        cell.Format["border.bottom"].Should().Be("thick");
+        cell.Format["border.bottom.sz"].Should().Be(12u);
+        cell.Format["border.bottom.color"].Should().Be("#FF0000");
 
         // 6. Persistence
         Reopen();
         cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
-        cell.Format["border.bottom"].Should().Be("thick;12;#FF0000");
-        cell.Format["border.top"].Should().Be("dashed;4;#00FF00");
+        cell.Format["border.bottom"].Should().Be("thick");
+        cell.Format["border.bottom.color"].Should().Be("#FF0000");
+        cell.Format["border.top"].Should().Be("dashed");
+        cell.Format["border.top.color"].Should().Be("#00FF00");
     }
 
     [Fact]
@@ -573,9 +586,11 @@ public class WordFunctionalTests : IDisposable
 
         // Verify table-level borders
         var tbl = _handler.Get("/body/tbl[1]");
-        tbl.Format["border.top"].Should().Be("thick;12;#000000");
-        tbl.Format["border.bottom"].Should().Be("thick;12;#000000");
-        tbl.Format["border.insideV"].Should().Be("none;4");
+        tbl.Format["border.top"].Should().Be("thick");
+        tbl.Format["border.top.sz"].Should().Be(12u);
+        tbl.Format["border.top.color"].Should().Be("#000000");
+        tbl.Format["border.bottom"].Should().Be("thick");
+        tbl.Format["border.insideV"].Should().Be("none");
 
         // Set header row cells with bottom border (the middle line)
         _handler.Set("/body/tbl[1]/tr[1]/tc[1]", new() { ["text"] = "Col A", ["border.bottom"] = "single;6;000000" });
@@ -584,15 +599,19 @@ public class WordFunctionalTests : IDisposable
 
         // Verify cell borders
         var headerCell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
-        headerCell.Format["border.bottom"].Should().Be("single;6;#000000");
+        headerCell.Format["border.bottom"].Should().Be("single");
+        headerCell.Format["border.bottom.sz"].Should().Be(6u);
+        headerCell.Format["border.bottom.color"].Should().Be("#000000");
         headerCell.Text.Should().Be("Col A");
 
         // Persistence
         Reopen();
         tbl = _handler.Get("/body/tbl[1]");
-        tbl.Format["border.top"].Should().Be("thick;12;#000000");
+        tbl.Format["border.top"].Should().Be("thick");
+        tbl.Format["border.top.color"].Should().Be("#000000");
         headerCell = _handler.Get("/body/tbl[1]/tr[1]/tc[2]");
-        headerCell.Format["border.bottom"].Should().Be("single;6;#000000");
+        headerCell.Format["border.bottom"].Should().Be("single");
+        headerCell.Format["border.bottom.color"].Should().Be("#000000");
     }
 
     [Fact]
@@ -604,7 +623,9 @@ public class WordFunctionalTests : IDisposable
         // Set wave border
         _handler.Set("/body/tbl[1]/tr[1]/tc[1]", new() { ["border.all"] = "wave;6;FF0000" });
         var cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
-        cell.Format["border.top"].Should().Be("wave;6;#FF0000");
+        cell.Format["border.top"].Should().Be("wave");
+        cell.Format["border.top.sz"].Should().Be(6u);
+        cell.Format["border.top.color"].Should().Be("#FF0000");
 
         // Change to 3D emboss
         _handler.Set("/body/tbl[1]/tr[1]/tc[1]", new() { ["border.all"] = "3dEmboss;12;808080" });
@@ -636,22 +657,22 @@ public class WordFunctionalTests : IDisposable
         // 3. Get + Verify
         var cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
         cell.Text.Should().Be("Padded");
-        cell.Format["padding.top"].Should().Be("200");
-        cell.Format["padding.bottom"].Should().Be("200");
-        cell.Format["padding.left"].Should().Be("200");
-        cell.Format["padding.right"].Should().Be("200");
+        cell.Format["padding.top"].Should().Be(200);
+        cell.Format["padding.bottom"].Should().Be(200);
+        cell.Format["padding.left"].Should().Be(200);
+        cell.Format["padding.right"].Should().Be(200);
 
         // 4. Modify single side
         _handler.Set("/body/tbl[1]/tr[1]/tc[1]", new() { ["padding.left"] = "400" });
         cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
-        cell.Format["padding.left"].Should().Be("400");
-        cell.Format["padding.top"].Should().Be("200");
+        cell.Format["padding.left"].Should().Be(400);
+        cell.Format["padding.top"].Should().Be(200);
 
         // 5. Persistence
         Reopen();
         cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
-        cell.Format["padding.left"].Should().Be("400");
-        cell.Format["padding.top"].Should().Be("200");
+        cell.Format["padding.left"].Should().Be(400);
+        cell.Format["padding.top"].Should().Be(200);
     }
 
     // ==================== Column Width Lifecycle ====================
@@ -668,20 +689,20 @@ public class WordFunctionalTests : IDisposable
 
         // 2. Get table + verify colWidths
         var tbl = _handler.Get("/body/tbl[1]");
-        tbl.Format["colWidths"].Should().Be("1500,3000,4500");
+        tbl.Format["colWidths"].Should().Be("1500dxa,3000dxa,4500dxa");
 
         // 3. Verify cell widths are also set
         var cell1 = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
-        cell1.Format["width"].Should().Be("1500");
+        cell1.Format["width"].Should().Be("1500dxa");
         var cell2 = _handler.Get("/body/tbl[1]/tr[1]/tc[2]");
-        cell2.Format["width"].Should().Be("3000");
+        cell2.Format["width"].Should().Be("3000dxa");
         var cell3 = _handler.Get("/body/tbl[1]/tr[1]/tc[3]");
-        cell3.Format["width"].Should().Be("4500");
+        cell3.Format["width"].Should().Be("4500dxa");
 
         // 4. Persistence
         Reopen();
         tbl = _handler.Get("/body/tbl[1]");
-        tbl.Format["colWidths"].Should().Be("1500,3000,4500");
+        tbl.Format["colWidths"].Should().Be("1500dxa,3000dxa,4500dxa");
     }
 
     // ==================== Table Properties Lifecycle ====================
@@ -701,7 +722,7 @@ public class WordFunctionalTests : IDisposable
         // 2. Get + Verify
         var tbl = _handler.Get("/body/tbl[1]");
         tbl.Format["indent"].Should().Be(720);
-        tbl.Format["cellSpacing"].Should().Be("20");
+        tbl.Format["cellSpacing"].Should().Be(20);
         tbl.Format["layout"].Should().Be("fixed");
 
         // 3. Set — modify via Set
@@ -710,14 +731,14 @@ public class WordFunctionalTests : IDisposable
         // 4. Get + Verify
         tbl = _handler.Get("/body/tbl[1]");
         tbl.Format["indent"].Should().Be(1440);
-        tbl.Format["layout"].Should().Be("auto");
+        tbl.Format["layout"].Should().Be("autofit");
 
         // 5. Persistence
         Reopen();
         tbl = _handler.Get("/body/tbl[1]");
         tbl.Format["indent"].Should().Be(1440);
-        tbl.Format["layout"].Should().Be("auto");
-        tbl.Format["cellSpacing"].Should().Be("20");
+        tbl.Format["layout"].Should().Be("autofit");
+        tbl.Format["cellSpacing"].Should().Be(20);
     }
 
     [Fact]
@@ -755,18 +776,18 @@ public class WordFunctionalTests : IDisposable
 
         // 2. Get + Verify
         var tbl = _handler.Get("/body/tbl[1]");
-        tbl.Format["padding.top"].Should().Be("150");
-        tbl.Format["padding.bottom"].Should().Be("150");
+        tbl.Format["padding.top"].Should().Be(150);
+        tbl.Format["padding.bottom"].Should().Be(150);
 
         // 3. Set — change default padding
         _handler.Set("/body/tbl[1]", new() { ["padding"] = "300" });
         tbl = _handler.Get("/body/tbl[1]");
-        tbl.Format["padding.top"].Should().Be("300");
+        tbl.Format["padding.top"].Should().Be(300);
 
         // 4. Persistence
         Reopen();
         tbl = _handler.Get("/body/tbl[1]");
-        tbl.Format["padding.top"].Should().Be("300");
+        tbl.Format["padding.top"].Should().Be(300);
     }
 
     // ==================== Row Height Exact Lifecycle ====================
@@ -782,19 +803,19 @@ public class WordFunctionalTests : IDisposable
 
         // 3. Get + Verify
         var row = _handler.Get("/body/tbl[1]/tr[1]");
-        row.Format["height"].Should().Be(500u);
+        row.Format["height"].Should().Be("500dxa");
         row.Format["height.rule"].Should().Be("exact");
 
         // 4. Set at-least height on another row
         _handler.Set("/body/tbl[1]/tr[2]", new() { ["height"] = "400" });
         var row2 = _handler.Get("/body/tbl[1]/tr[2]");
-        row2.Format["height"].Should().Be(400u);
+        row2.Format["height"].Should().Be("400dxa");
         row2.Format.Should().NotContainKey("height.rule");
 
         // 5. Persistence
         Reopen();
         row = _handler.Get("/body/tbl[1]/tr[1]");
-        row.Format["height"].Should().Be(500u);
+        row.Format["height"].Should().Be("500dxa");
         row.Format["height.rule"].Should().Be("exact");
     }
 
@@ -874,8 +895,8 @@ public class WordFunctionalTests : IDisposable
         // 3. Get + Verify all properties returned
         var cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
         cell.Text.Should().Be("Full");
-        cell.Format["shd"].Should().Be("#FF0000");
-        cell.Format["alignment"].Should().Be("center");
+        cell.Format["shading.fill"].Should().Be("#FF0000");
+        cell.Format["align"].Should().Be("center");
         cell.Format["valign"].Should().Be("center");
 
         // 4. Set vmerge and gridspan
@@ -891,7 +912,7 @@ public class WordFunctionalTests : IDisposable
         // 5. Persistence
         Reopen();
         cell = _handler.Get("/body/tbl[1]/tr[1]/tc[1]");
-        cell.Format["shd"].Should().Be("#FF0000");
+        cell.Format["shading.fill"].Should().Be("#FF0000");
         cell.Format["vmerge"].Should().Be("restart");
     }
 
@@ -905,12 +926,12 @@ public class WordFunctionalTests : IDisposable
         });
 
         var tbl = _handler.Get("/body/tbl[1]");
-        tbl.Format["alignment"].Should().Be("center");
+        tbl.Format["align"].Should().Be("center");
         tbl.Format["width"].Should().Be("8000");
 
         Reopen();
         tbl = _handler.Get("/body/tbl[1]");
-        tbl.Format["alignment"].Should().Be("center");
+        tbl.Format["align"].Should().Be("center");
     }
 
     // ==================== Document Core Properties Lifecycle ====================
@@ -953,23 +974,23 @@ public class WordFunctionalTests : IDisposable
 
         // 2. Get + Verify
         var node = _handler.Get("/body/p[1]");
-        ((string)node.Format["leftindent"]).Should().Be("720");
+        ((string)node.Format["leftindent"]).Should().Be("36pt");
 
         // 3. Set (modify + add right indent and hanging)
         _handler.Set("/body/p[1]", new() { ["leftindent"] = "1440", ["rightindent"] = "720", ["hanging"] = "360" });
 
         // 4. Get + Verify
         node = _handler.Get("/body/p[1]");
-        ((string)node.Format["leftindent"]).Should().Be("1440");
-        ((string)node.Format["rightindent"]).Should().Be("720");
-        ((string)node.Format["hangingindent"]).Should().Be("360");
+        ((string)node.Format["leftindent"]).Should().Be("72pt");
+        ((string)node.Format["rightindent"]).Should().Be("36pt");
+        ((string)node.Format["hangingindent"]).Should().Be("18pt");
 
         // 5. Persistence
         Reopen();
         node = _handler.Get("/body/p[1]");
-        ((string)node.Format["leftindent"]).Should().Be("1440");
-        ((string)node.Format["rightindent"]).Should().Be("720");
-        ((string)node.Format["hangingindent"]).Should().Be("360");
+        ((string)node.Format["leftindent"]).Should().Be("72pt");
+        ((string)node.Format["rightindent"]).Should().Be("36pt");
+        ((string)node.Format["hangingindent"]).Should().Be("18pt");
     }
 
     // ==================== Superscript/Subscript Lifecycle ====================
@@ -1027,7 +1048,7 @@ public class WordFunctionalTests : IDisposable
 
         // 6. Verify removed
         node = _handler.Get("/body/p[1]");
-        node.Format.Should().NotContainKey("keepnext");
+        node.Format["keepnext"].Should().Be(false);
 
         // 7. Persistence
         Reopen();
@@ -1079,7 +1100,7 @@ public class WordFunctionalTests : IDisposable
 
         // 2. Add footnote
         var path = _handler.Add("/body/p[1]", "footnote", null, new() { ["text"] = "This is a footnote" });
-        path.Should().Be("/footnote[1]");
+        path.Should().Be("/footnote[@footnoteId=1]");
 
         // 3. Get + Verify
         var fn = _handler.Get("/footnote[1]");
@@ -1111,7 +1132,7 @@ public class WordFunctionalTests : IDisposable
 
         // 2. Add endnote
         var path = _handler.Add("/body/p[1]", "endnote", null, new() { ["text"] = "This is an endnote" });
-        path.Should().Be("/endnote[1]");
+        path.Should().Be("/endnote[@endnoteId=1]");
 
         // 3. Get + Verify
         var en = _handler.Get("/endnote[1]");
@@ -1174,7 +1195,7 @@ public class WordFunctionalTests : IDisposable
     public void StyleCreation_FullLifecycle()
     {
         // 1. Create style
-        var path = _handler.Add("/body", "style", null, new()
+        var path = _handler.Add("/styles", "style", null, new()
         {
             ["name"] = "MyCustomStyle", ["id"] = "MyCustomStyle",
             ["font"] = "Arial", ["size"] = "14", ["bold"] = "true", ["color"] = "FF0000",
@@ -1185,11 +1206,11 @@ public class WordFunctionalTests : IDisposable
         // 2. Get + Verify style properties
         var style = _handler.Get("/styles/MyCustomStyle");
         style.Type.Should().Be("style");
-        ((string)style.Format["font"]).Should().Be("Arial");
+        ((string)style.Format["font.ascii"]).Should().Be("Arial");
         ((string)style.Format["size"]).Should().Be("14pt");
         ((bool)style.Format["bold"]).Should().BeTrue();
         ((string)style.Format["color"]).Should().Be("#FF0000");
-        ((string)style.Format["alignment"]).Should().Be("center");
+        ((string)style.Format["align"]).Should().Be("center");
         ((string)style.Format["spaceBefore"]).Should().Be("12pt");
 
         // 3. Set (modify style)
@@ -1197,7 +1218,7 @@ public class WordFunctionalTests : IDisposable
 
         // 4. Get + Verify
         style = _handler.Get("/styles/MyCustomStyle");
-        ((string)style.Format["font"]).Should().Be("Calibri");
+        ((string)style.Format["font.ascii"]).Should().Be("Calibri");
         ((string)style.Format["size"]).Should().Be("12pt");
         style.Format.Should().NotContainKey("bold");
 
@@ -1209,7 +1230,7 @@ public class WordFunctionalTests : IDisposable
         // 6. Persistence
         Reopen();
         style = _handler.Get("/styles/MyCustomStyle");
-        ((string)style.Format["font"]).Should().Be("Calibri");
+        ((string)style.Format["font.ascii"]).Should().Be("Calibri");
         node = _handler.Get("/body/p[1]");
         node.Style.Should().Be("MyCustomStyle");
     }

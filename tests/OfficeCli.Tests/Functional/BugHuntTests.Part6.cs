@@ -371,7 +371,7 @@ public partial class BugHuntTests
 
         // BUG: returns "Microsoft YaHei" (EastAsia) instead of "Arial" (Ascii)
         // because GetRunFont checks EastAsia first
-        runNode.Format["font"]?.ToString().Should().Be("Arial",
+        runNode.Format["font.latin"]?.ToString().Should().Be("Arial",
             "GetRunFont should return Ascii font for Western text, " +
             "not EastAsia font, but it checks EastAsia before Ascii");
     }

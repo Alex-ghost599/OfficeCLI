@@ -42,6 +42,14 @@ public partial class ExcelHandler
             "cellis" => Add(parentPath, "cellis", position, properties),
             "highlight" when properties.ContainsKey("operator")
                 => Add(parentPath, "cellis", position, properties),
+            "greaterthan" or "gt" or ">" => AddCellIsRouted(parentPath, position, properties, "greaterThan"),
+            "lessthan" or "lt" or "<" => AddCellIsRouted(parentPath, position, properties, "lessThan"),
+            "greaterthanorequal" or "gte" or ">=" => AddCellIsRouted(parentPath, position, properties, "greaterThanOrEqual"),
+            "lessthanorequal" or "lte" or "<=" => AddCellIsRouted(parentPath, position, properties, "lessThanOrEqual"),
+            "equal" or "eq" or "=" or "==" => AddCellIsRouted(parentPath, position, properties, "equal"),
+            "notequal" or "ne" or "!=" or "<>" => AddCellIsRouted(parentPath, position, properties, "notEqual"),
+            "between" => AddCellIsRouted(parentPath, position, properties, "between"),
+            "notbetween" => AddCellIsRouted(parentPath, position, properties, "notBetween"),
             // R39-1: `top` / `topPercent` / `bottom` / `bottomPercent` are
             // user-facing aliases for the OOXML `top10` cfRule. Without this
             // mapping, the dispatch fell through to the default `databar`
@@ -81,6 +89,12 @@ public partial class ExcelHandler
         return Add(parentPath, "topn", position, properties);
     }
 
+    private string AddCellIsRouted(string parentPath, InsertPosition? position, Dictionary<string, string> properties, string op)
+    {
+        if (!properties.ContainsKey("operator")) properties["operator"] = op;
+        return Add(parentPath, "cellis", position, properties);
+    }
+
     private string AddDataBar(string parentPath, string type, InsertPosition? position, Dictionary<string, string> properties)
     {
         var index = position?.Index;
@@ -94,6 +108,14 @@ public partial class ExcelHandler
             if (cfTypeLower is "colorscale") return Add(parentPath, "colorscale", position, properties);
             if (cfTypeLower is "formula" or "expression") return Add(parentPath, "formulacf", position, properties);
             if (cfTypeLower is "cellis") return Add(parentPath, "cellis", position, properties);
+            if (cfTypeLower is "greaterthan" or "gt" or ">") return AddCellIsRouted(parentPath, position, properties, "greaterThan");
+            if (cfTypeLower is "lessthan" or "lt" or "<") return AddCellIsRouted(parentPath, position, properties, "lessThan");
+            if (cfTypeLower is "greaterthanorequal" or "gte" or ">=") return AddCellIsRouted(parentPath, position, properties, "greaterThanOrEqual");
+            if (cfTypeLower is "lessthanorequal" or "lte" or "<=") return AddCellIsRouted(parentPath, position, properties, "lessThanOrEqual");
+            if (cfTypeLower is "equal" or "eq" or "=" or "==") return AddCellIsRouted(parentPath, position, properties, "equal");
+            if (cfTypeLower is "notequal" or "ne" or "!=" or "<>") return AddCellIsRouted(parentPath, position, properties, "notEqual");
+            if (cfTypeLower is "between") return AddCellIsRouted(parentPath, position, properties, "between");
+            if (cfTypeLower is "notbetween") return AddCellIsRouted(parentPath, position, properties, "notBetween");
             // R39-1: same alias set as AddCf — keep both dispatch sites in sync.
             if (cfTypeLower is "topn" or "top10" or "top") return Add(parentPath, "topn", position, properties);
             if (cfTypeLower is "toppercent") return AddTopRouted(parentPath, position, properties, percent: true, bottom: false);

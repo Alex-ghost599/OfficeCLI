@@ -380,10 +380,9 @@ public class BugHuntPart36 : IDisposable
     }
 
     // =====================================================================
-    // Bug3612: Word Set footnote with unsupported property — not reported
-    // The footnote Set handler only handles "text". Any other property
-    // should be added to the unsupported list, but the code doesn't have
-    // a default case for non-text properties.
+    // Bug3612: Word Set footnote format keys follow the current note contract.
+    // Formatting keys are supported on footnote content; truly unknown keys
+    // must still be reported in the unsupported list.
     // =====================================================================
     [Fact]
     public void Bug3612_Word_Set_Footnote_Unsupported_Property_Not_Reported()
@@ -397,16 +396,22 @@ public class BugHuntPart36 : IDisposable
 
         var unsupported = handler.Set("/footnote[1]", new()
         {
-            ["bold"] = "true"
+            ["bold"] = "true",
+            ["unknownFootnoteProp"] = "1"
         });
 
-        unsupported.Should().Contain("bold",
-            "Footnote Set should report unsupported properties like 'bold'");
+        unsupported.Should().NotContain("bold",
+            "Footnote Set supports run formatting on note content");
+        unsupported.Should().Contain("unknownFootnoteProp",
+            "unknown footnote properties should still be reported");
+
+        var note = handler.Get("/footnote[1]");
+        note.Format["bold"].Should().Be(true);
     }
 
     // =====================================================================
-    // Bug3613: Word Set endnote with unsupported property — not reported
-    // Same issue as Bug3612 but for endnotes.
+    // Bug3613: Word Set endnote format keys follow the current note contract.
+    // Mirrors Bug3612 for endnote content.
     // =====================================================================
     [Fact]
     public void Bug3613_Word_Set_Endnote_Unsupported_Property_Not_Reported()
@@ -420,11 +425,17 @@ public class BugHuntPart36 : IDisposable
 
         var unsupported = handler.Set("/endnote[1]", new()
         {
-            ["font"] = "Arial"
+            ["font"] = "Arial",
+            ["unknownEndnoteProp"] = "1"
         });
 
-        unsupported.Should().Contain("font",
-            "Endnote Set should report unsupported properties like 'font'");
+        unsupported.Should().NotContain("font",
+            "Endnote Set supports run formatting on note content");
+        unsupported.Should().Contain("unknownEndnoteProp",
+            "unknown endnote properties should still be reported");
+
+        var note = handler.Get("/endnote[1]");
+        note.Format["font"].Should().Be("Arial");
     }
 
     // =====================================================================
@@ -691,8 +702,8 @@ public class BugHuntPart36 : IDisposable
 
         var node = handler.Get("/body/p[1]");
         node.Text.Should().Be("Updated");
-        node.Format.Should().ContainKey("font");
-        node.Format["font"].ToString().Should().Contain("Courier New");
+        node.Format.Should().ContainKey("font.latin");
+        node.Format["font.latin"].ToString().Should().Contain("Courier New");
     }
 
     // =====================================================================

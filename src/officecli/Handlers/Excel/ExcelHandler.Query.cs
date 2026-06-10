@@ -567,20 +567,27 @@ public partial class ExcelHandler
             var cf = cfElements[cfIdx - 1];
             var cfNode = new DocumentNode { Path = path, Type = "conditionalFormatting" };
             cfNode.Format["ref"] = cf.SequenceOfReferences?.InnerText ?? "";
+            cfNode.Format["sqref"] = cfNode.Format["ref"];
 
             var rule = cf.Elements<ConditionalFormattingRule>().FirstOrDefault();
             if (rule != null)
             {
+                void SetCfType(string value)
+                {
+                    cfNode.Format["type"] = value;
+                    cfNode.Format["cfType"] = value;
+                }
+
                 // Canonical CF type key. Normalized variants overwrite this below
                 // (e.g. ConditionalFormatValues.Top10 -> "topN", Expression -> "formula").
                 if (rule.Type?.Value != null)
-                    cfNode.Format["type"] = rule.Type.InnerText;
+                    SetCfType(rule.Type.InnerText ?? rule.Type.Value.ToString());
 
                 // DataBar
                 var dataBar = rule.GetFirstChild<DataBar>();
                 if (dataBar != null)
                 {
-                    cfNode.Format["type"] = "dataBar";
+                    SetCfType("dataBar");
                     var dbColor = dataBar.GetFirstChild<DocumentFormat.OpenXml.Spreadsheet.Color>();
                     if (dbColor?.Rgb?.Value != null)
                         cfNode.Format["color"] = ParseHelpers.FormatHexColor(dbColor.Rgb.Value);
@@ -616,16 +623,22 @@ public partial class ExcelHandler
                 var colorScale = rule.GetFirstChild<ColorScale>();
                 if (colorScale != null)
                 {
-                    cfNode.Format["type"] = "colorScale";
+                    SetCfType("colorScale");
                     var colors = colorScale.Elements<DocumentFormat.OpenXml.Spreadsheet.Color>().ToList();
                     if (colors.Count >= 2)
                     {
                         var minRgb = colors[0].Rgb?.Value;
                         var maxRgb = colors[^1].Rgb?.Value;
                         if (!string.IsNullOrEmpty(minRgb))
+                        {
                             cfNode.Format["minColor"] = ParseHelpers.FormatHexColor(minRgb);
+                            cfNode.Format["mincolor"] = cfNode.Format["minColor"];
+                        }
                         if (!string.IsNullOrEmpty(maxRgb))
+                        {
                             cfNode.Format["maxColor"] = ParseHelpers.FormatHexColor(maxRgb);
+                            cfNode.Format["maxcolor"] = cfNode.Format["maxColor"];
+                        }
                         if (colors.Count >= 3)
                         {
                             var midRgb = colors[1].Rgb?.Value;
@@ -639,7 +652,7 @@ public partial class ExcelHandler
                 var iconSet = rule.GetFirstChild<IconSet>();
                 if (iconSet != null)
                 {
-                    cfNode.Format["type"] = "iconSet";
+                    SetCfType("iconSet");
                     if (iconSet.IconSetValue?.Value != null)
                         cfNode.Format["iconset"] = iconSet.IconSetValue.InnerText;
                     if (iconSet.ShowValue?.Value != null)
@@ -652,7 +665,7 @@ public partial class ExcelHandler
                 var formula = rule.GetFirstChild<Formula>();
                 if (formula != null && rule.Type?.Value == ConditionalFormatValues.Expression)
                 {
-                    cfNode.Format["type"] = "formula";
+                    SetCfType("formula");
                     cfNode.Format["formula"] = formula.Text ?? "";
                     if (rule.FormatId?.Value != null)
                         cfNode.Format["dxfId"] = rule.FormatId.Value;
@@ -661,7 +674,7 @@ public partial class ExcelHandler
                 // Top/Bottom N
                 if (rule.Type?.Value == ConditionalFormatValues.Top10)
                 {
-                    cfNode.Format["type"] = "topN";
+                    SetCfType("topN");
                     if (rule.Rank?.HasValue == true) cfNode.Format["rank"] = rule.Rank.Value;
                     if (rule.Bottom?.Value == true) cfNode.Format["bottom"] = true;
                     if (rule.Percent?.Value == true) cfNode.Format["percent"] = true;
@@ -671,7 +684,7 @@ public partial class ExcelHandler
                 // Above/Below Average
                 if (rule.Type?.Value == ConditionalFormatValues.AboveAverage)
                 {
-                    cfNode.Format["type"] = "aboveAverage";
+                    SetCfType("aboveAverage");
                     if (rule.AboveAverage?.HasValue == true) cfNode.Format["aboveAverage"] = rule.AboveAverage.Value;
                     if (rule.FormatId?.Value != null) cfNode.Format["dxfId"] = rule.FormatId.Value;
                 }
@@ -679,21 +692,21 @@ public partial class ExcelHandler
                 // Duplicate Values
                 if (rule.Type?.Value == ConditionalFormatValues.DuplicateValues)
                 {
-                    cfNode.Format["type"] = "duplicateValues";
+                    SetCfType("duplicateValues");
                     if (rule.FormatId?.Value != null) cfNode.Format["dxfId"] = rule.FormatId.Value;
                 }
 
                 // Unique Values
                 if (rule.Type?.Value == ConditionalFormatValues.UniqueValues)
                 {
-                    cfNode.Format["type"] = "uniqueValues";
+                    SetCfType("uniqueValues");
                     if (rule.FormatId?.Value != null) cfNode.Format["dxfId"] = rule.FormatId.Value;
                 }
 
                 // Contains Text
                 if (rule.Type?.Value == ConditionalFormatValues.ContainsText)
                 {
-                    cfNode.Format["type"] = "containsText";
+                    SetCfType("containsText");
                     if (rule.Text?.HasValue == true) cfNode.Format["text"] = rule.Text.Value;
                     if (rule.FormatId?.Value != null) cfNode.Format["dxfId"] = rule.FormatId.Value;
                 }
@@ -701,7 +714,7 @@ public partial class ExcelHandler
                 // CellIs (operator-based comparison: between/equal/greaterThan/...)
                 if (rule.Type?.Value == ConditionalFormatValues.CellIs)
                 {
-                    cfNode.Format["type"] = "cellIs";
+                    SetCfType("cellIs");
                     if (rule.Operator?.HasValue == true)
                         cfNode.Format["operator"] = rule.Operator.InnerText;
                     var cellIsFormulas = rule.Elements<Formula>().ToList();
@@ -715,7 +728,7 @@ public partial class ExcelHandler
                 // Time Period (date occurring)
                 if (rule.Type?.Value == ConditionalFormatValues.TimePeriod)
                 {
-                    cfNode.Format["type"] = "timePeriod";
+                    SetCfType("timePeriod");
                     if (rule.TimePeriod?.HasValue == true) cfNode.Format["period"] = rule.TimePeriod.InnerText;
                     if (rule.FormatId?.Value != null) cfNode.Format["dxfId"] = rule.FormatId.Value;
                 }

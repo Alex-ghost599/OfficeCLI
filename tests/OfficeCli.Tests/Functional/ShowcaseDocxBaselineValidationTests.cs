@@ -11,7 +11,9 @@ public class ShowcaseDocxBaselineValidationTests
     [Fact]
     public void AnnualReport_ShowcaseSample_ValidatesCleanly()
     {
-        var path = Path.Combine(RepoRoot, "assets", "showcase", "annual-report.docx");
+        using var harness = new CliSubprocessHarness();
+        var sourcePath = Path.Combine(RepoRoot, "assets", "showcase", "annual-report.docx");
+        var path = harness.CopyFixture(sourcePath);
 
         using var handler = new WordHandler(path, editable: false);
         var errors = handler.Validate();
@@ -22,7 +24,9 @@ public class ShowcaseDocxBaselineValidationTests
     [Fact]
     public void AcademicPaper_ShowcaseSample_ValidatesCleanly()
     {
-        var path = Path.Combine(RepoRoot, "assets", "showcase", "academic-paper.docx");
+        using var harness = new CliSubprocessHarness();
+        var sourcePath = Path.Combine(RepoRoot, "assets", "showcase", "academic-paper.docx");
+        var path = harness.CopyFixture(sourcePath);
 
         using var handler = new WordHandler(path, editable: false);
         var errors = handler.Validate();
