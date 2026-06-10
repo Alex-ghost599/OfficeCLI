@@ -1,4 +1,4 @@
-// Copyright 2025 OfficeCli (officecli.ai)
+// Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
 namespace OfficeCli.Core;
@@ -16,7 +16,7 @@ namespace OfficeCli.Core;
 /// two different things. For those we refuse silent mapping and return a
 /// precise hint telling the user to pick one explicitly.
 /// </summary>
-public static class CellPropHints
+internal static class CellPropHints
 {
     private static readonly Dictionary<string, string> AmbiguousKeys = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -24,6 +24,10 @@ public static class CellPropHints
         // the user might intuitively expect background color. Force them to
         // pick: `font.color` (text) or `fill` (background).
         ["color"] = "ambiguous in cell context — use 'font.color' for text color or 'fill' for background color",
+        // R17 bt-3: `path=` looks plausible (path-like keys exist for picture/ole)
+        // but cell uses `ref=` (or `address=`) for the target address. Silently
+        // dropping `path` writes the value to the wrong cell — fail loudly.
+        ["path"] = "not a cell property — use 'ref' (or 'address') for the cell address, e.g. --prop ref=D5",
     };
 
     /// <summary>

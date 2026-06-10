@@ -84,10 +84,11 @@ public class BugHuntPart22 : IDisposable
         // Remove the sheet
         _excelHandler.Remove("/Data");
 
-        // Missing named ranges follow the Excel Get contract and return null.
+        // Missing named ranges follow the Excel Get contract and return an error node.
         var node = _excelHandler.Get("/namedrange[MyRange]");
-        node.Should().BeNull(
+        node.Type.Should().Be("error",
             "named range referencing a deleted sheet should be automatically cleaned up");
+        node.Text.Should().Contain("not found");
     }
 
 

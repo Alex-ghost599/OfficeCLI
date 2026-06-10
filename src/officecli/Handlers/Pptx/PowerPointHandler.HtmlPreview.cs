@@ -1,4 +1,4 @@
-// Copyright 2025 OfficeCli (officecli.ai)
+// Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
 using System.Text;
@@ -12,13 +12,72 @@ namespace OfficeCli.Handlers;
 
 public partial class PowerPointHandler
 {
+    private string? _cachedDocCjkFallback;
+
+    /// <summary>
+    /// Resolve a CSS CJK font-family fallback fragment for the whole document,
+    /// based on the theme's MinorFont/EastAsianFont declaration. Instance
+    /// wrapper around <see cref="ResolveDocCjkFallbackStatic"/>; caches the
+    /// result because every shape's font-family CSS string may need it.
+    /// </summary>
+    private string ResolveDocCjkFallback()
+        => _cachedDocCjkFallback ??= ResolveDocCjkFallbackStatic(_doc);
+
+    /// <summary>
+    /// Static counterpart of <see cref="ResolveDocCjkFallback"/> — accepts
+    /// the document directly so it can be invoked from static SVG render
+    /// helpers that don't carry a handler instance reference.
+    ///
+    /// Returns a comma-separated, individually-quoted CSS font-family
+    /// fragment (no leading comma). When the document declares no CJK
+    /// font in the theme — i.e. it's locale-neutral — returns a wide,
+    /// language-agnostic CJK chain so any CJK glyphs in the slides still
+    /// render reliably, without privileging one script's typography.
+    /// </summary>
+    internal static string ResolveDocCjkFallbackStatic(PresentationDocument doc)
+    {
+        string? themeEa = null;
+        try
+        {
+            var masters = doc.PresentationPart?.SlideMasterParts;
+            if (masters != null)
+            {
+                foreach (var m in masters)
+                {
+                    var ea = m.ThemePart?.Theme?.ThemeElements?.FontScheme?
+                        .MinorFont?.GetFirstChild<Drawing.EastAsianFont>()?.Typeface?.Value;
+                    if (!string.IsNullOrEmpty(ea)) { themeEa = ea; break; }
+                }
+            }
+        }
+        catch (System.Xml.XmlException) { }
+
+        var locale = LocaleFontRegistry.DetectLocaleFromCjkFontName(themeEa);
+        var chain = LocaleFontRegistry.GetCjkCssFallback(locale);
+
+        // Locale-neutral fallback: when the document carries no script signal,
+        // emit a broad CJK chain covering zh/ja/ko on macOS/Windows/Linux
+        // without favoring one. Slides containing CJK content still render;
+        // pure-Latin documents are unaffected (browsers ignore unused fonts).
+        return string.IsNullOrEmpty(chain)
+            ? "'PingFang SC', 'Hiragino Sans', 'Yu Gothic', 'Apple SD Gothic Neo', 'Microsoft YaHei', 'Noto Sans CJK SC'"
+            : chain;
+    }
+
     /// <summary>
     /// Generate a self-contained HTML file that previews all slides.
     /// Each slide is rendered as an absolutely-positioned div with CSS styling.
     /// Images are embedded as base64 data URIs.
     /// </summary>
-    public string ViewAsHtml(int? startSlide = null, int? endSlide = null)
+    public string ViewAsHtml(int? startSlide = null, int? endSlide = null, int gridCols = 0, int viewportPx = 1600)
     {
+        // CSS demands '.' as the decimal separator; under comma-decimal locales
+        // (de-DE, fr-FR, …) every `$"{double}pt"` interpolation deep in the
+        // renderer would emit `141,73pt`, producing invalid CSS. Switching the
+        // thread culture once at the entry point covers every nested helper
+        // without auditing each interpolation.
+        using var _cul = InvariantCultureScope.Enter();
+        ResetModel3DRenderState();
         var sb = new StringBuilder();
         var slideParts = GetSlideParts().ToList();
 
@@ -31,19 +90,57 @@ public partial class PowerPointHandler
         var themeColors = ResolveThemeColorMap();
 
         sb.AppendLine("<!DOCTYPE html>");
-        sb.AppendLine("<html lang=\"en\">");
+        // i18n: emit lang from the first run's <a:rPr lang=...> when present
+        // (PPT carries no presentation-level language tag analogous to Word's
+        // themeFontLang; per-run lang is the closest signal). RTL containers are
+        // emitted PER-SHAPE / PER-PARAGRAPH (direction:rtl on shape-text and
+        // unicode-bidi:embed on the para); document-wide dir="rtl" is NOT set
+        // because it forces every LTR shape's default text-align to right.
+        string presLang = "en";
+        foreach (var sp in slideParts)
+        {
+            var slide = sp.Slide;
+            if (slide == null) continue;
+            var firstRunLang = slide.Descendants<DocumentFormat.OpenXml.Drawing.RunProperties>()
+                .Select(rp => rp.Language?.Value)
+                .FirstOrDefault(l => !string.IsNullOrEmpty(l));
+            if (!string.IsNullOrEmpty(firstRunLang)) { presLang = firstRunLang!; break; }
+        }
+        sb.AppendLine($"<html lang=\"{HtmlEncode(presLang)}\">");
         sb.AppendLine("<head>");
         sb.AppendLine("<meta charset=\"UTF-8\">");
         sb.AppendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">");
         sb.AppendLine($"<title>{HtmlEncode(Path.GetFileName(_filePath))}</title>");
-        // KaTeX for math rendering (graceful degradation: shows raw LaTeX when offline)
-        sb.AppendLine("<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css\" onerror=\"this.remove()\">");
-        sb.AppendLine("<script defer src=\"https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js\" onerror=\"document.querySelectorAll('.katex-formula').forEach(function(el){el.textContent=el.dataset.formula;el.style.fontFamily='monospace';el.style.color='#666'})\"></script>");
+        // KaTeX for math rendering — only include when any slide actually has formulas.
+        // media=print + onload swap makes the CSS non-blocking so it can never stall first paint.
+        bool hasMathFormulas = slideParts.Any(sp => sp.Slide?.Descendants<DocumentFormat.OpenXml.Math.OfficeMath>().Any() == true);
+        if (hasMathFormulas)
+        {
+            sb.AppendLine("<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css\" media=\"print\" onload=\"this.media='all'\" onerror=\"this.remove()\">");
+            sb.AppendLine("<script defer src=\"https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js\" onerror=\"document.querySelectorAll('.katex-formula').forEach(function(el){el.textContent=el.dataset.formula;el.style.fontFamily='monospace';el.style.color='#666'})\"></script>");
+        }
         // Three.js for 3D model rendering (graceful degradation: shows placeholder when offline)
         sb.AppendLine(@"<script type=""importmap"">{""imports"":{""three"":""https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"",""three/addons/"":""https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/""}}</script>");
         sb.AppendLine("<style>");
         sb.AppendLine(GenerateCss(slideWidthPt, slideHeightPt));
         sb.AppendLine("</style>");
+        if (gridCols > 0)
+        {
+            // Grid override for thumbnail-style screenshot. 1pt = 4/3 px;
+            // each cell gets viewportPx/cols width; scale slides to fit.
+            double slideNativePx = slideWidthPt * 4.0 / 3.0;
+            double padding = 24.0;
+            double gap = 12.0;
+            double cellPx = (viewportPx - padding - (gridCols - 1) * gap) / gridCols;
+            double scale = cellPx / slideNativePx;
+            sb.AppendLine("<style>");
+            sb.AppendLine(".sidebar,.sidebar-toggle,.toggle-zone,.slide-label,.slide-notes,.file-title{display:none !important}");
+            sb.AppendLine($".main{{display:grid !important;grid-template-columns:repeat({gridCols},1fr) !important;gap:{gap}px !important;padding:{padding / 2}px !important;margin-left:0 !important;align-items:start !important;justify-items:center !important;flex-direction:unset !important}}");
+            sb.AppendLine($".slide-container{{width:100% !important;align-items:flex-start !important}}");
+            sb.AppendLine($".slide-wrapper{{width:{cellPx:0.##}px !important;height:{cellPx / (slideWidthPt / slideHeightPt):0.##}px !important;overflow:hidden !important;display:block !important;position:relative !important}}");
+            sb.AppendLine($".slide{{transform:scale({scale:0.######}) !important;transform-origin:top left !important;position:absolute !important;top:0 !important;left:0 !important}}");
+            sb.AppendLine("</style>");
+        }
         // Auto-hide sidebar in headless/automated browsers (screenshot, Playwright, etc.)
         sb.AppendLine("<script>if(navigator.webdriver||/HeadlessChrome/.test(navigator.userAgent))document.documentElement.classList.add('headless')</script>");
         sb.AppendLine("</head>");
@@ -102,6 +199,7 @@ public partial class PowerPointHandler
 
             sb.AppendLine("    </div>");
             sb.AppendLine("  </div>");
+            RenderSpeakerNotes(sb, slidePart);
             sb.AppendLine("</div>");
         }
 
@@ -122,14 +220,34 @@ public partial class PowerPointHandler
             el.textContent = el.dataset.formula;
             el.style.fontFamily = 'monospace';
             el.style.color = '#666';
+            el.classList.add('katex-rendered');
         });
     }
     function renderKatex() {
+        var pending = document.querySelectorAll('.katex-formula:not(.katex-rendered)');
+        if (pending.length === 0) return;
         if (typeof katex === 'undefined') {
+            // Lazy-load on first demand — covers watch mode where the initial
+            // doc had no formulas (KaTeX tags omitted from head), then a
+            // formula arrived via SSE patch.
+            if (!window._katexLoading) {
+                window._katexLoading = true;
+                var link = document.createElement('link');
+                link.rel = 'stylesheet';
+                link.href = 'https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css';
+                link.onerror = function() { this.remove(); };
+                document.head.appendChild(link);
+                var script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js';
+                script.onload = renderKatex;
+                script.onerror = fallbackKatex;
+                document.head.appendChild(script);
+                return;
+            }
             if (++_katexRetries > 20) { fallbackKatex(); return; }
             setTimeout(renderKatex, 100); return;
         }
-        document.querySelectorAll('.katex-formula:not(.katex-rendered)').forEach(function(el) {
+        pending.forEach(function(el) {
             try {
                 katex.render(el.dataset.formula, el, { throwOnError: false, displayMode: true });
                 el.classList.add('katex-rendered');
@@ -155,6 +273,9 @@ public partial class PowerPointHandler
     /// </summary>
     public string? RenderSlideHtml(int slideNum)
     {
+        // Each slide-render call must be self-contained: the receiver (watch
+        // SSE replace) has no other source for the GLB data scripts.
+        ResetModel3DRenderState();
         var slideParts = GetSlideParts().ToList();
         if (slideNum < 1 || slideNum > slideParts.Count) return null;
 
@@ -184,6 +305,7 @@ public partial class PowerPointHandler
 
         sb.AppendLine("    </div>");
         sb.AppendLine("  </div>");
+        RenderSpeakerNotes(sb, slidePart);
         sb.AppendLine("</div>");
 
         return sb.ToString();
@@ -195,6 +317,65 @@ public partial class PowerPointHandler
     public int GetSlideCount()
     {
         return GetSlideParts().Count();
+    }
+
+    // ==================== Speaker Notes ====================
+
+    /// <summary>
+    /// Render the slide's speaker notes (if any) as a sibling block under the
+    /// slide-wrapper. R8-bt-3: prior to this, ViewAsHtml silently dropped
+    /// notes — Arabic / Hebrew authors reviewing notes saw nothing.
+    /// Direction is propagated from the notes body shape's first paragraph
+    /// rtl flag so RTL notes render right-aligned.
+    /// </summary>
+    private static void RenderSpeakerNotes(StringBuilder sb, SlidePart slidePart)
+    {
+        var notesPart = slidePart.NotesSlidePart;
+        var spTree = notesPart?.NotesSlide?.CommonSlideData?.ShapeTree;
+        if (spTree == null) return;
+
+        Shape? notesShape = null;
+        foreach (var shape in spTree.Elements<Shape>())
+        {
+            var ph = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
+                ?.GetFirstChild<PlaceholderShape>();
+            if (ph?.Index?.Value == 1)
+            {
+                notesShape = shape;
+                break;
+            }
+        }
+        if (notesShape == null) return;
+
+        var paragraphs = notesShape.TextBody?.Elements<Drawing.Paragraph>().ToList()
+            ?? new List<Drawing.Paragraph>();
+        if (paragraphs.Count == 0) return;
+
+        // Reduce to plain-text lines; bail if every paragraph is empty.
+        var lines = paragraphs
+            .Select(p => string.Concat(p.Elements<Drawing.Run>().Select(r => r.Text?.Text ?? "")))
+            .ToList();
+        if (lines.All(string.IsNullOrEmpty)) return;
+
+        // Inherit direction from the first paragraph's rtl flag (notes-level
+        // direction is uniform — ApplyNotesDirection stamps every paragraph).
+        bool rtl = paragraphs.FirstOrDefault()?.ParagraphProperties?.RightToLeft?.Value == true;
+        var dirAttr = rtl ? " dir=\"rtl\"" : "";
+
+        sb.AppendLine($"  <div class=\"slide-notes\"{dirAttr}>");
+        sb.AppendLine("    <div class=\"slide-notes-label\">Notes</div>");
+        sb.AppendLine("    <div class=\"slide-notes-body\">");
+        foreach (var line in lines)
+        {
+            // System.Net.WebUtility.HtmlEncode is the canonical escape used
+            // elsewhere in the preview — empty paragraphs render as <br/>.
+            if (string.IsNullOrEmpty(line))
+                sb.AppendLine("      <br/>");
+            else
+                sb.AppendLine($"      <div>{System.Net.WebUtility.HtmlEncode(line)}</div>");
+        }
+        sb.AppendLine("    </div>");
+        sb.AppendLine("  </div>");
     }
 
     // ==================== CSS ====================
@@ -258,7 +439,24 @@ public partial class PowerPointHandler
         {
             var dataUri = BlipToDataUri(blipFill, part);
             if (dataUri != null)
-                return $"background:url('{dataUri}') center/cover no-repeat;";
+            {
+                var css = $"background:url('{dataUri}') center/cover no-repeat;";
+                // R59-5: surface <a:alphaModFix amt="..."/> as CSS opacity so
+                // the HTML preview matches PowerPoint's faded image bg render.
+                // amt is 0..100000 (100000 = opaque). Skip when opaque/default
+                // to keep the emitted CSS minimal.
+                var alphaMod = blipFill.GetFirstChild<Drawing.Blip>()?.GetFirstChild<Drawing.AlphaModulationFixed>();
+                if (alphaMod?.Amount?.HasValue == true)
+                {
+                    var amt = alphaMod.Amount.Value;
+                    if (amt < 100000)
+                    {
+                        var opacity = amt / 100000.0;
+                        css += $"opacity:{opacity:0.##};";
+                    }
+                }
+                return css;
+            }
         }
 
         return "";
@@ -285,12 +483,15 @@ public partial class PowerPointHandler
         var minorLatin = fontScheme?.MinorFont?.GetFirstChild<Drawing.LatinFont>()?.Typeface?.Value;
         var minorEa = fontScheme?.MinorFont?.GetFirstChild<Drawing.EastAsianFont>()?.Typeface?.Value;
 
-        // Build font-family with fallbacks including CJK fonts
+        // Build font-family with fallbacks including CJK fonts. The CJK chain
+        // is locale-driven (read from theme's east-asian font name); when the
+        // document carries no script signal, ResolveDocCjkFallback returns a
+        // broad cross-script chain so slides still render reliably.
         var fonts = new List<string>();
         if (!string.IsNullOrEmpty(minorLatin)) fonts.Add($"'{CssSanitize(minorLatin)}'");
         if (!string.IsNullOrEmpty(minorEa)) fonts.Add($"'{CssSanitize(minorEa)}'");
-        // CJK fallback chain: macOS → Windows → Linux
-        fonts.AddRange(new[] { "'PingFang SC'", "'Microsoft YaHei'", "'Noto Sans CJK SC'", "'Hiragino Sans GB'", "sans-serif" });
+        fonts.Add(ResolveDocCjkFallback());
+        fonts.Add("sans-serif");
         styles.Add($"font-family:{string.Join(",", fonts)};");
 
         // 2. Default text size from presentation defaultTextStyle or slide master otherStyle
@@ -354,7 +555,7 @@ public partial class PowerPointHandler
         // Per-element-type positional counters used to build the data-path of each
         // top-level element. We prefer @id= when the element has a cNvPr id (stable
         // across edits), and fall back to positional [N] otherwise.
-        int shapeIdx = 0, picIdx = 0, tableIdx = 0, chartIdx = 0, cxnIdx = 0, groupIdx = 0;
+        int shapeIdx = 0, picIdx = 0, tableIdx = 0, chartIdx = 0, cxnIdx = 0, groupIdx = 0, oleIdx = 0, model3dIdx = 0;
         string PathFor(string typeName, OpenXmlElement el, int positional)
             => $"/slide[{slideNum}]/{BuildElementPathSegment(typeName, el, positional)}";
 
@@ -382,6 +583,11 @@ public partial class PowerPointHandler
                         chartIdx++;
                         RenderChart(sb, gf, slidePart, themeColors, dataPath: PathFor("chart", gf, chartIdx));
                     }
+                    else if (gf.Descendants<DocumentFormat.OpenXml.Presentation.OleObject>().Any())
+                    {
+                        oleIdx++;
+                        RenderOlePlaceholder(sb, gf, dataPath: PathFor("ole", gf, oleIdx));
+                    }
                     break;
                 case ConnectionShape cxn:
                     cxnIdx++;
@@ -394,7 +600,15 @@ public partial class PowerPointHandler
                 default:
                     // mc:AlternateContent — render 3D models, zoom, etc.
                     if (element.LocalName == "AlternateContent")
-                        RenderAlternateContent(sb, element, slidePart, themeColors);
+                    {
+                        string? acDataPath = null;
+                        if (element.Descendants().Any(d => d.LocalName == "model3d"))
+                        {
+                            model3dIdx++;
+                            acDataPath = $"/slide[{slideNum}]/model3d[{model3dIdx}]";
+                        }
+                        RenderAlternateContent(sb, element, slidePart, themeColors, acDataPath);
+                    }
                     break;
             }
         }
@@ -434,6 +648,22 @@ public partial class PowerPointHandler
             RenderInheritedShapes(sb, masterPart.SlideMaster?.CommonSlideData?.ShapeTree, masterPart, slidePlaceholders, themeColors);
     }
 
+    // RenderInheritedShapes — render the layout/master shapes that the slide
+    // doesn't override. Two rules:
+    //
+    //   1. Layout/master placeholders never contribute TEXT — what's in their
+    //      <p:txBody> is edit-prompt boilerplate ("Click to add title", "单击
+    //      此处添加正文"). Real content always lives on the slide. The only
+    //      placeholders whose text IS legitimately layout/master-supplied are
+    //      the four metadata slots (date/footer/header/slide number); keep
+    //      those.
+    //
+    //   2. ECMA-376 §19.3.1.36: a <p:ph> with no `type` attribute defaults to
+    //      `obj`. Open XML SDK exposes this as `Type.HasValue == false`, so
+    //      type-based logic that hinges on HasValue silently misses these
+    //      shapes — that was the bug behind issue #79: a layout body
+    //      placeholder authored without an explicit type leaked its prompt
+    //      text onto the slide.
     private void RenderInheritedShapes(StringBuilder sb, ShapeTree? shapeTree, OpenXmlPart part,
         HashSet<string> skipIndices, Dictionary<string, string> themeColors)
     {
@@ -446,25 +676,26 @@ public partial class PowerPointHandler
             var ph = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
                 ?.GetFirstChild<PlaceholderShape>();
 
-            // Skip title/body content placeholders (these are structural, not decorative)
-            if (ph?.Type?.HasValue == true)
+            bool suppressText = false;
+            if (ph != null)
             {
-                var t = ph.Type.Value;
-                if (t == PlaceholderValues.Title || t == PlaceholderValues.CenteredTitle ||
-                    t == PlaceholderValues.SubTitle || t == PlaceholderValues.Body ||
-                    t == PlaceholderValues.Object)
+                // Slide already supplies this slot — slide content wins.
+                if (ph.Index?.HasValue == true && skipIndices.Contains($"idx:{ph.Index.Value}"))
+                    continue;
+                if (ph.Type?.HasValue == true && skipIndices.Contains($"type:{ph.Type.InnerText}"))
                     continue;
 
-                // Skip if slide already has this placeholder type
-                if (skipIndices.Contains($"type:{ph.Type.InnerText}")) continue;
+                // ECMA-376 default: absent type == obj. Without this, a body
+                // placeholder authored without an explicit type sneaks past
+                // every type-based check.
+                var type = ph.Type?.HasValue == true ? ph.Type.Value : PlaceholderValues.Object;
+                suppressText = !IsLayoutSuppliedTextPlaceholder(type);
             }
 
-            // Skip if slide already has a shape with this placeholder index
-            if (ph?.Index?.HasValue == true && skipIndices.Contains($"idx:{ph.Index.Value}"))
-                continue;
-
-            // Skip shapes with no visual content (empty text, no fill, no picture)
-            var text = GetShapeText(shape);
+            // Skip shapes with no visual content. When text is suppressed, treat
+            // it as empty: a content placeholder with only prompt text and no
+            // fill/outline isn't worth an empty box on the slide.
+            var text = suppressText ? "" : GetShapeText(shape);
             var hasFill = shape.ShapeProperties?.GetFirstChild<Drawing.SolidFill>() != null
                 || shape.ShapeProperties?.GetFirstChild<Drawing.GradientFill>() != null
                 || shape.ShapeProperties?.GetFirstChild<Drawing.BlipFill>() != null;
@@ -473,8 +704,7 @@ public partial class PowerPointHandler
             if (string.IsNullOrWhiteSpace(text) && !hasFill && !hasLine)
                 continue;
 
-            // Render this inherited shape
-            RenderShape(sb, shape, part, themeColors);
+            RenderShape(sb, shape, part, themeColors, suppressText: suppressText);
         }
 
         // Also render pictures from layout/master (logos, decorative images)
@@ -483,5 +713,11 @@ public partial class PowerPointHandler
             RenderPicture(sb, pic, part, themeColors);
         }
     }
+
+    private static bool IsLayoutSuppliedTextPlaceholder(PlaceholderValues type) =>
+        type == PlaceholderValues.DateAndTime
+        || type == PlaceholderValues.Footer
+        || type == PlaceholderValues.Header
+        || type == PlaceholderValues.SlideNumber;
 
 }

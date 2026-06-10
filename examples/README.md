@@ -19,33 +19,52 @@ Examples assume `officecli` is already installed. `officecli install` copies the
 ```
 examples/
 ├── README.md                          # This file
-├── word/                              # 📄 Word examples (3 scripts)
-│   ├── README.md
-│   ├── gen-formulas.sh
-│   ├── gen-complex-tables.sh
-│   ├── gen-complex-textbox.sh
-│   └── outputs/
-├── excel/                             # 📊 Excel examples (2 scripts)
-│   ├── README.md
-│   ├── gen-beautiful-charts.sh
-│   ├── gen-charts-demo.sh
-│   └── outputs/
-└── ppt/                               # 🎨 PowerPoint (3 scripts + 14 style templates)
-    ├── README.md
-    ├── gen-beautiful-pptx.sh
-    ├── gen-animations-pptx.sh
-    ├── gen-video-pptx.py
-    ├── outputs/
-    └── templates/                     # 14 Professional Style Templates ⭐
-        ├── README.md
-        └── styles/                    # (all with pre-generated PPTs)
-            ├── dark--*/               (14 dark styles)
-            ├── light--*/              (8 light styles)
-            ├── warm--*/               (5 warm styles)
-            ├── vivid--*/              (2 vivid styles)
-            ├── bw--*/                 (3 black & white)
-            └── mixed--*/              (1 mixed style)
+├── word/                              # 📄 Word examples
+│   ├── formulas.sh / formulas.docx
+│   ├── tables.sh / tables.docx
+│   ├── textbox.sh
+│   ├── run-formatting.{sh,md,docx}      # run/character property surface
+│   ├── paragraph-formatting.{sh,md,docx}# paragraph property surface
+│   ├── numbering.sh / numbering.docx
+│   └── revisions.{sh,md,docx}         # tracked-change (revision) API
+├── excel/                             # 📊 Excel examples
+│   ├── cell-formatting.{md,py,xlsx}   # Full cell property surface (fonts/fills/borders/numFmt/data)
+│   ├── charts.sh / charts.xlsx        # Master chart showcase
+│   ├── charts/                        # Per-type chart scripts
+│   │   ├── charts-demo.{sh,md,xlsx}
+│   │   └── charts-<type>.{md,py,xlsx}
+│   │       (basic, advanced, extended, area, bar, boxwhisker,
+│   │        bubble, column, combo, histogram, line, pie, radar,
+│   │        scatter, stock, waterfall)
+│   └── pivot-tables.py / pivot-tables.xlsx
+└── ppt/                               # 🎨 PowerPoint examples
+    ├── presentation.{md,sh,pptx}
+    ├── animations.{md,sh,pptx}
+    ├── video.{md,py,pptx}
+    ├── 3d-model.{md,sh,pptx}
+    ├── charts/                        # PowerPoint chart showcases
+    │   └── charts-<type>.{md,py,pptx}
+    │       (column, bar, line, pie, doughnut, area, scatter,
+    │        bubble, radar, stock, combo, waterfall, 3d, advanced)
+    ├── tables/                        # PowerPoint table showcases
+    │   └── tables-<topic>.{md,sh,pptx}
+    │       (basic, styled, merged, borders, rows-cols, financial)
+    ├── transitions/                   # Slide transition showcases
+    │   └── transitions-<topic>.{md,sh,pptx}
+    │       (basic, directional, shapes, bands, dynamic, modern, random, timing, morph)
+    ├── shapes/                        # Primitive shape building blocks
+    │   ├── shapes-basic.{md,sh,pptx}        # geometries, fills, outlines, rotation, basic effects
+    │   ├── shapes-connectors.{md,sh,pptx}   # straight/elbow/curve connectors + groups
+    │   ├── shapes-effects.{md,sh,pptx}      # autoFit, flip, image fill, 3D, softEdge, links, zorder
+    │   └── shapes-typography.{md,sh,pptx}   # paragraph/char spacing, kern, case, RTL, font.cs, lang
+    ├── textboxes/                     # Text container primitives
+    │   ├── textboxes-basic.{md,sh,pptx}     # alignment, bullets, runs, per-script fonts
+    │   └── textboxes-advanced.{md,sh,pptx}  # per-paragraph overrides, indents, per-run typography
+    └── pictures/                      # Image embedding
+        └── pictures-basic.{md,py,pptx}      # src forms, crop, rotation, clickable links
 ```
+
+Each example follows the same trio: `<name>.md` (walkthrough), `<name>.sh`/`.py` (build script), `<name>.<ext>` (pre-generated output).
 
 ---
 
@@ -56,121 +75,85 @@ examples/
 **Word (.docx):**
 ```bash
 cd word
-bash gen-formulas.sh            # LaTeX math formulas
-bash gen-complex-tables.sh      # Styled tables
-bash gen-complex-textbox.sh     # Formatted text boxes
+bash run-formatting.sh         # Run/character formatting: bold/underline/strike/caps/super-sub/fonts/effects
+bash paragraph-formatting.sh   # Paragraph formatting: align/indent/spacing/pagination/shading/markRPr
+bash formulas.sh             # LaTeX math formulas
+bash tables.sh               # Styled tables
+bash textbox.sh              # Formatted text boxes
+bash numbering.sh   # List/numbering styles
+bash revisions.sh            # Tracked-change (revision) API — ins/del/format/move/cellChange
 ```
 
 **Excel (.xlsx):**
 ```bash
 cd excel
-bash gen-beautiful-charts.sh    # Professional charts
-bash gen-charts-demo.sh         # 14+ chart types
+python cell-formatting.py    # Full cell property surface: fonts, fills, borders, number formats, formulas/links
+bash charts.sh               # Master chart showcase
+bash charts/charts-demo.sh   # 14+ chart types
+python charts/charts-line.py # Single-type example (any charts/charts-<type>.py)
+python pivot-tables.py       # Pivot tables
 ```
 
 **PowerPoint (.pptx):**
 ```bash
 cd ppt
-bash gen-beautiful-pptx.sh      # Morph transitions
-bash gen-animations-pptx.sh     # Animation effects
-python gen-video-pptx.py        # Video embedding
+bash presentation.sh         # Morph transitions / full deck
+bash animations.sh           # Animation effects
+python video.py              # Video embedding
+bash 3d-model.sh             # 3D model embedding
+python charts/charts-column.py      # PowerPoint chart examples (any charts/charts-<type>.py)
+bash tables/tables-basic.sh         # Tables — minimal create + populate
+bash tables/tables-styled.sh        # 9 built-in styles + banding flags + rowHeight/name=
+bash tables/tables-merged.sh        # gridSpan horizontal merge
+bash tables/tables-borders.sh       # Per-side / per-cell borders
+bash tables/tables-rows-cols.sh     # add row/column, per-row height, gridSpan + merge.down
+bash tables/tables-financial.sh     # End-to-end financial deck
+bash transitions/transitions-basic.sh        # cut/fade/dissolve/flash + 'none' clear
+bash transitions/transitions-directional.sh  # push/wipe/cover/uncover × direction matrix
+bash transitions/transitions-shapes.sh       # circle/diamond/wedge/wheel/zoom
+bash transitions/transitions-bands.sh        # blinds/strips/split/checker
+bash transitions/transitions-dynamic.sh      # 2010+ Exciting gallery (vortex/flip/...)
+bash transitions/transitions-modern.sh       # 2013+ Exciting gallery (pageCurl/airplane/origami/...)
+bash transitions/transitions-random.sh       # newsflash / random
+bash transitions/transitions-timing.sh       # speed, duration, advanceTime, advanceClick
+bash transitions/transitions-morph.sh        # 2016+ Morph tweening
+bash shapes/shapes-basic.sh                  # geometries, fills, outlines, rotation, basic effects
+bash shapes/shapes-connectors.sh             # straight/elbow/curve connectors + groups
+bash shapes/shapes-effects.sh                # autoFit, flip, image fill, 3D, softEdge, links, zorder
+bash shapes/shapes-typography.sh             # spacing, kern, case, RTL direction, font.cs, lang
+bash textboxes/textboxes-basic.sh            # alignment, bullets, runs, per-script fonts
+bash textboxes/textboxes-advanced.sh         # per-paragraph overrides, indents, per-run typography
+python pictures/pictures-basic.py            # picture src/crop/rotation/links (needs Pillow)
 ```
-
-### Professional Style Templates
-
-```bash
-cd ppt/templates/styles/dark--investor-pitch
-# View pre-generated PPT
-open template.pptx
-
-# Or regenerate
-bash build.sh
-```
-
-👉 **[Browse all 35 styles →](ppt/templates/)** (all with pre-generated PPTs)
 
 ---
 
 ## 📚 Documentation by Type
 
 ### 📄 [Word Examples →](word/)
-**3 scripts demonstrating:**
+- Run / character formatting — weight, underline variants, strike/dstrike, caps/smallCaps, super/subscript, color/size/highlight, per-script fonts, text effects, character spacing, language
+- Paragraph formatting — alignment, indentation, spacing, pagination flags, paragraph-level run formatting, shading, paragraph-mark (markRPr) formatting, outline level
 - Mathematical formulas (LaTeX)
-- Complex table creation
-- Text styling and formatting
-
-**Key Techniques:**
-- Paragraph and run manipulation
-- Table structure and styling
-- Font and color formatting
-- Document structure navigation
-
----
+- Complex tables
+- Text boxes and styling
+- Numbering / list showcases
 
 ### 📊 [Excel Examples →](excel/)
-**2 scripts demonstrating:**
-- Professional chart creation
-- Multiple chart types (14+)
-- Data visualization
-
-**Key Techniques:**
-- Cell value and formula manipulation
-- Chart creation and styling
-- Data range selection
-- Number formatting
-
----
+- Cell formatting — the full `cell` property surface across 5 sheets: fonts (name/size/bold/italic/color/underline/strike), fills (hex/named/rgb) + alignment (h/v/wrap/RTL), borders (shorthand/all/per-side/color), number formats (thousands/%/currency/date/scientific/accounting), and data (value/type/formula/link/locked/merge)
+- Master and per-type chart scripts (line, bar, pie, scatter, stock, waterfall, …)
+- Pivot tables
+- Number formatting and styling
 
 ### 🎨 [PowerPoint Examples →](ppt/)
-**3 scripts + 35 professional style templates:**
-- Morph transitions
-- Animation effects
-- Video embedding
-- 35 design styles (15 ready-to-use)
-
-**Key Techniques:**
-- Slide creation and layout
-- Shape positioning and styling
-- Transitions and animations
-- Media embedding
-- Professional design patterns
-
-**Style Categories:**
-- 🌑 **Dark** (14) - Tech, corporate, futuristic
-- ☀️ **Light** (8) - Clean, professional, product showcases
-- 🧡 **Warm** (5) - Friendly, lifestyle, organic brands
-- 🌈 **Vivid** (2) - Energetic, youthful marketing
-- ⬛ **Black & White** (3) - Minimalist, sophisticated
-- 🎨 **Mixed** (1) - Bold architectural designs
-
----
-
-## 🎓 Learning Path
-
-### Beginner (Start Here)
-1. **Word** - [`gen-formulas.sh`](word/gen-formulas.sh)
-2. **Excel** - [`gen-charts-demo.sh`](excel/gen-charts-demo.sh)
-3. **PowerPoint** - Simple shape creation
-
-**Learn:** Basic commands, file structure, properties
-
----
-
-### Intermediate
-4. **Word** - [`gen-complex-tables.sh`](word/gen-complex-tables.sh)
-5. **Excel** - [`gen-beautiful-charts.sh`](excel/gen-beautiful-charts.sh)
-6. **PowerPoint** - [`gen-animations-pptx.sh`](ppt/gen-animations-pptx.sh)
-
-**Learn:** Batch operations, styling, advanced properties
-
----
-
-### Advanced
-7. **Style Templates** - Explore [professional styles](ppt/templates/)
-8. **PowerPoint** - [`gen-beautiful-pptx.sh`](ppt/gen-beautiful-pptx.sh)
-9. **Python Integration** - [`gen-video-pptx.py`](ppt/gen-video-pptx.py)
-
-**Learn:** Morph transitions, complex layouts, design patterns, automation
+- Slide / shape construction
+- Morph transitions and animations
+- Video and 3D model embedding
+- Native chart examples (column, bar, line, pie, doughnut, area, scatter, bubble, radar, stock, combo, waterfall, 3D, advanced)
+- Tables — basic, built-in styles, merged cells, borders, row/column ops, real-world financial deck
+- Slide transitions — all 59 schema tokens covered across 9 trios: basic, directional, shape, band, dynamic 3D (p14), modern (p15 — Page Curl, Airplane, Origami, …), random, timing, and Morph
+- Shapes — full pptx/shape property surface across 4 trios: geometries + fills + outlines + rotation + basic effects (basic), straight/elbow/curve connectors + groups (connectors), autoFit + flip + image-fill + 3D scene + softEdge + click links + zorder (effects), paragraph/char spacing + kerning + smallCaps + RTL + complex-script font + BCP-47 lang (typography)
+- Textboxes — alignment, bulleted/numbered lists, run-by-run rich text (bold/italic/color/super/sub/strike), per-script fonts (Latin/EastAsian), vertical alignment and padding
+- Pictures — file path / URL / data-URI / `name=` for `src=`, all crop forms (symmetric, V,H, per-edge L/T/R/B), rotation, clickable links (URL / slide jump / named action)
 
 ---
 
@@ -254,6 +237,9 @@ officecli set report.docx /body/p[1] --prop color=FF0000
 | `outline` | Structure | `officecli view file.docx outline` |
 | `stats` | Statistics | `officecli view file.docx stats` |
 | `issues` | Problems | `officecli view file.docx issues` |
+| `html` | HTML preview | `officecli view file.docx html` |
+| `svg` | SVG preview | `officecli view file.docx svg` |
+| `forms` | Form fields | `officecli view file.docx forms` |
 
 ---
 
@@ -270,11 +256,11 @@ officecli set report.docx /body/p[1] --prop color=FF0000
    officecli query data.xlsx "cell[formula~=SUM]" --json | jq
    ```
 
-3. **Check help for properties:**
+3. **Check help for properties** (schema reference is under the `help` verb):
    ```bash
-   officecli docx set paragraph
-   officecli xlsx set cell
-   officecli pptx set shape
+   officecli help docx set paragraph
+   officecli help xlsx set cell
+   officecli help pptx set shape
    ```
 
 4. **Validate after changes:**
@@ -282,24 +268,16 @@ officecli set report.docx /body/p[1] --prop color=FF0000
    officecli validate document.docx
    ```
 
-5. **Use resident mode for performance:**
+5. **Use resident mode for performance** (3+ operations on same file):
    ```bash
-   # For 3+ operations on same file
    officecli open file.pptx
    # ... multiple commands ...
    officecli close file.pptx
    ```
 
-6. **Batch for complex operations:**
-   - Single open/save cycle
-   - Atomic transactions
-   - Better performance
-
 ---
 
 ## 🤝 Contributing Examples
-
-Want to add an example? Follow this structure:
 
 1. **Create script** with clear comments
 2. **Test and verify** output
@@ -319,7 +297,7 @@ FILE="output.docx"
 officecli create "$FILE"
 # ... your commands ...
 officecli validate "$FILE"
-echo "✅ Created: $FILE"
+echo "Created: $FILE"
 ```
 
 ---
@@ -328,26 +306,24 @@ echo "✅ Created: $FILE"
 
 - **[SKILL.md](../SKILL.md)** - Complete command reference for AI agents
 - **[README.md](../README.md)** - Project overview and installation
-- **[API Documentation](../docs/)** - Detailed API reference
 
 ---
 
 ## 🆘 Getting Help
 
-**Command help:**
+**Top-level help:**
 ```bash
-officecli --help
-officecli docx --help
-officecli docx set --help
-officecli pptx set shape
+officecli --help                       # CLI usage
+officecli help                         # Schema reference entry point
+officecli help docx                    # All docx elements
+officecli help docx set                # Elements that support `set` for docx
+officecli help docx set paragraph      # Settable properties on paragraph
+officecli help docx paragraph --json   # Raw schema JSON
+officecli help all                     # Flat dump of every (format, element, property)
 ```
 
-**Three-layer help navigation:**
-```bash
-officecli pptx set              # All settable elements
-officecli pptx set shape        # Shape properties
-officecli pptx set shape.fill   # Fill property details
-```
+Format aliases: `word→docx`, `excel→xlsx`, `ppt`/`powerpoint→pptx`.
+Verbs: `add`, `set`, `get`, `query`, `remove`.
 
 ---
 

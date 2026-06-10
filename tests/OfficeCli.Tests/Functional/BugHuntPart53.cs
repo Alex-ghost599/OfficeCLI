@@ -480,13 +480,13 @@ public class BugHuntPart53 : IDisposable
 
         var node = handler.Get("/body/p[1]");
         node.Format.Should().ContainKey("firstlineindent");
-        node.Format["firstlineindent"].Should().Be("720");
+        node.Format["firstlineindent"].Should().Be("36pt");
 
         // Modify via Set
         handler.Set(node.Path, new() { ["firstlineindent"] = "1440" });
 
         node = handler.Get("/body/p[1]");
-        node.Format["firstlineindent"].Should().Be("1440",
+        node.Format["firstlineindent"].Should().Be("72pt",
             "firstlineindent should round-trip correctly through Set");
     }
 
@@ -508,12 +508,12 @@ public class BugHuntPart53 : IDisposable
 
         var node = handler.Get("/body/p[1]");
         node.Format.Should().ContainKey("leftindent");
-        node.Format["leftindent"].Should().Be("1440");
+        node.Format["leftindent"].Should().Be("72pt");
 
         handler.Set(node.Path, new() { ["leftindent"] = "2880" });
 
         node = handler.Get("/body/p[1]");
-        node.Format["leftindent"].Should().Be("2880");
+        node.Format["leftindent"].Should().Be("144pt");
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -534,12 +534,12 @@ public class BugHuntPart53 : IDisposable
 
         var node = handler.Get("/body/p[1]");
         node.Format.Should().ContainKey("hangingindent");
-        node.Format["hangingindent"].Should().Be("360");
+        node.Format["hangingindent"].Should().Be("18pt");
 
         handler.Set(node.Path, new() { ["hangingindent"] = "720" });
 
         node = handler.Get("/body/p[1]");
-        node.Format["hangingindent"].Should().Be("720");
+        node.Format["hangingindent"].Should().Be("36pt");
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -560,12 +560,12 @@ public class BugHuntPart53 : IDisposable
 
         var node = handler.Get("/body/p[1]");
         node.Format.Should().ContainKey("rightindent");
-        node.Format["rightindent"].Should().Be("720");
+        node.Format["rightindent"].Should().Be("36pt");
 
         handler.Set(node.Path, new() { ["rightindent"] = "1440" });
 
         node = handler.Get("/body/p[1]");
-        node.Format["rightindent"].Should().Be("1440");
+        node.Format["rightindent"].Should().Be("72pt");
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -660,8 +660,9 @@ public class BugHuntPart53 : IDisposable
         handler.Set(node.Path, new() { ["keepnext"] = "false" });
 
         node = handler.Get("/body/p[1]");
-        node.Format.Should().NotContainKey("keepnext",
-            "after Set keepnext=false, the property should be removed");
+        node.Format.Should().ContainKey("keepnext");
+        node.Format["keepnext"].Should().Be(false,
+            "after Set keepnext=false, Get should preserve the explicit disabled state");
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -715,8 +716,9 @@ public class BugHuntPart53 : IDisposable
         handler.Set(node.Path, new() { ["pagebreakbefore"] = "false" });
 
         node = handler.Get("/body/p[1]");
-        node.Format.Should().NotContainKey("pagebreakbefore",
-            "after Set pagebreakbefore=false, the property should be removed");
+        node.Format.Should().ContainKey("pagebreakbefore");
+        node.Format["pagebreakbefore"].Should().Be(false,
+            "after Set pagebreakbefore=false, Get should preserve the explicit disabled state");
     }
 
     // ────────────────────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-// Copyright 2025 OfficeCli (officecli.ai)
+// Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
 using DocumentFormat.OpenXml.Packaging;
@@ -35,13 +35,31 @@ public partial class WordHandler
             case "docgrid.linepitch":
             {
                 var grid = EnsureDocGridInSection();
-                grid.LinePitch = ParseHelpers.SafeParseInt(value, "docGrid.linePitch");
+                var lp = ParseHelpers.SafeParseInt(value, "docGrid.linePitch");
+                // OOXML ST_DecimalNumber here describes a positive line height
+                // (twips). 0/negative values disable the grid silently — Word
+                // ignores the docGrid in that case, so reject up front rather
+                // than letting a no-op land on disk.
+                if (lp < 1)
+                    throw new ArgumentException(
+                        $"Invalid docGrid.linePitch '{value}': must be a positive integer in twips (>= 1).");
+                grid.LinePitch = lp;
                 return true;
             }
             case "docgrid.charspace" or "docgrid.characterspace":
             {
                 var grid = EnsureDocGridInSection();
-                grid.CharacterSpace = ParseHelpers.SafeParseInt(value, "docGrid.charSpace");
+                var cs = ParseHelpers.SafeParseInt(value, "docGrid.charSpace");
+                // ECMA-376 declares charSpace as ST_DecimalNumber (xsd:integer)
+                // — any signed integer. Real Word documents using CJK grid
+                // commonly write negative values (e.g. -2049 for tight
+                // east-asian spacing). An earlier revision of this code
+                // rejected anything outside [0, 32767], which broke
+                // round-trip on every CJK docx and is documented in
+                // CONSISTENCY(docgrid-charspace-signed). The OOXML SDK
+                // (Int32Value) accepts any int, so we delegate range
+                // checking to Word itself.
+                grid.CharacterSpace = cs;
                 return true;
             }
 
@@ -74,7 +92,7 @@ public partial class WordHandler
                         _ => throw new ArgumentException($"Invalid charSpacingControl: '{value}'. Valid: doNotCompress, compressPunctuation, compressPunctuationAndJapaneseKana")
                     }
                 };
-                InsertSettingsElementInSchemaOrder(settings, csc);
+                settings.AddChild(csc);
                 EnsureSettings().Save();
                 return true;
             }
@@ -146,12 +164,16 @@ public partial class WordHandler
                 settings.GetFirstChild<BookFoldPrintingSheets>()?.Remove();
                 // Treat "false", "0", empty as remove; otherwise parse as int
                 if (!string.IsNullOrEmpty(value) && value != "0" && !string.Equals(value, "false", StringComparison.OrdinalIgnoreCase))
-                    InsertSettingsElementInSchemaOrder(settings, new BookFoldPrintingSheets { Val = (short)ParseHelpers.SafeParseInt(value, "bookFoldPrintingSheets") });
+                    settings.AddChild(new BookFoldPrintingSheets { Val = (short)ParseHelpers.SafeParseInt(value, "bookFoldPrintingSheets") });
                 settings.Save();
                 return true;
             }
             case "evenandoddheaders":
                 SetOnOffSetting<EvenAndOddHeaders>(EnsureSettings(), IsTruthy(value));
+                EnsureSettings().Save();
+                return true;
+            case "autohyphenation":
+                SetOnOffSetting<AutoHyphenation>(EnsureSettings(), IsTruthy(value));
                 EnsureSettings().Save();
                 return true;
             case "defaulttabstop":
@@ -161,7 +183,8 @@ public partial class WordHandler
                 if (twips > short.MaxValue)
                     throw new ArgumentException($"defaultTabStop value too large: {value} ({twips} twips, max {short.MaxValue})");
                 settings.GetFirstChild<DefaultTabStop>()?.Remove();
-                InsertSettingsElementInSchemaOrder(settings, new DefaultTabStop { Val = (short)twips });
+                // AddChild respects OOXML schema particle order on composite elements
+                settings.AddChild(new DefaultTabStop { Val = (short)twips });
                 settings.Save();
                 return true;
             }
@@ -259,15 +282,25 @@ public partial class WordHandler
         var existing = settings.GetFirstChild<T>();
         existing?.Remove();
         if (value)
-            InsertSettingsElementInSchemaOrder(settings, new T());
+            settings.AddChild(new T()); // AddChild respects OOXML schema particle order
     }
 
     /// <summary>
-    /// Insert a settings child using the SDK's schema-aware AddChild ordering.
+    /// Insert an element at the schema-correct position in w:settings.
+    /// Most settings elements must precede w:charSpacingControl and w:compat in the OOXML schema.
+    /// Inserts before the first of CharacterSpacingControl or Compatibility if present,
+    /// otherwise appends.
     /// </summary>
-    private static void InsertSettingsElementInSchemaOrder(Settings settings, DocumentFormat.OpenXml.OpenXmlElement elem)
+    private static void InsertBeforeCompatibility(Settings settings, DocumentFormat.OpenXml.OpenXmlElement elem)
     {
-        settings.AddChild(elem, throwOnError: false);
+        // Find the earliest anchor (charSpacingControl comes before compat in schema,
+        // and most other settings come before charSpacingControl)
+        var anchor = (DocumentFormat.OpenXml.OpenXmlElement?)settings.GetFirstChild<CharacterSpacingControl>()
+            ?? settings.GetFirstChild<Compatibility>();
+        if (anchor != null)
+            anchor.InsertBeforeSelf(elem);
+        else
+            settings.AppendChild(elem);
     }
 
     private Settings EnsureSettings()

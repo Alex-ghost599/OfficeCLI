@@ -1,7 +1,6 @@
-// Copyright 2025 OfficeCli (officecli.ai)
+// Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
-using System.Text;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Presentation;
@@ -44,7 +43,71 @@ public partial class PowerPointHandler
                 return $"background:url('{dataUri}') center/cover no-repeat";
         }
 
+        // Pattern fill (a:pattFill) — approximate the preset pattern with a CSS
+        // repeating-linear-gradient using the fg color over the bg color. Native
+        // Office tiles the real preset bitmap; the gradient gives a recognisable
+        // striped/cross texture and, crucially, surfaces the fg color so the
+        // shape no longer renders as plain white. Mirrors the colorScale/dxf
+        // approach of "approximate in CSS, don't leave it blank".
+        var pattFill = spPr.GetFirstChild<Drawing.PatternFill>();
+        if (pattFill != null)
+            return PatternFillToCss(pattFill, themeColors);
+
         return "";
+    }
+
+    /// <summary>
+    /// Convert an a:pattFill to a CSS repeating-linear-gradient approximation.
+    /// fg = the pattern's foreground color (the lines), bg = background color.
+    /// The preset name picks the gradient angle (diagonal / horizontal /
+    /// vertical / grid); unrecognised presets fall back to a diagonal stripe.
+    /// </summary>
+    private static string PatternFillToCss(Drawing.PatternFill pattFill, Dictionary<string, string> themeColors)
+    {
+        var fg = ResolveWrappedColor(pattFill.GetFirstChild<Drawing.ForegroundColor>(), themeColors) ?? "#000000";
+        var bg = ResolveWrappedColor(pattFill.GetFirstChild<Drawing.BackgroundColor>(), themeColors) ?? "#FFFFFF";
+        var preset = pattFill.Preset?.HasValue == true ? pattFill.Preset.InnerText : "diagStripe";
+
+        // Map preset family → gradient angle(s). Diagonal patterns use 45deg,
+        // horizontal use 0deg, vertical 90deg, grid/cross layer both.
+        var p = (preset ?? "").ToLowerInvariant();
+        bool isGrid = p.Contains("grid") || p.Contains("cross") || p.Contains("checker") || p.Contains("weave");
+        bool isHorz = p.Contains("horz");
+        bool isVert = p.Contains("vert");
+        var angle = isHorz ? "0deg" : isVert ? "90deg" : "45deg";
+
+        // 4px band: 2px fg line over 2px bg gap.
+        var stripe = $"repeating-linear-gradient({angle},{fg} 0,{fg} 2px,{bg} 2px,{bg} 4px)";
+        if (isGrid)
+        {
+            // Layer a perpendicular stripe to form a grid; comma-separated
+            // backgrounds stack (first on top).
+            var cross = $"repeating-linear-gradient({(isHorz ? "90deg" : "135deg")},{fg} 0,{fg} 2px,transparent 2px,transparent 4px)";
+            return $"background:{cross},{stripe}";
+        }
+        return $"background:{stripe}";
+    }
+
+    /// <summary>
+    /// Resolve a color from a wrapper element (a:fgClr / a:bgClr) that contains
+    /// a srgbClr or schemeClr child — same resolution as a SolidFill body.
+    /// </summary>
+    private static string? ResolveWrappedColor(OpenXmlCompositeElement? wrapper, Dictionary<string, string> themeColors)
+    {
+        if (wrapper == null) return null;
+
+        var rgb = wrapper.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
+        if (rgb != null && rgb.Length >= 6 && rgb[..6].All(char.IsAsciiHexDigit))
+            return $"#{rgb[..6]}";
+
+        var schemeColor = wrapper.GetFirstChild<Drawing.SchemeColor>();
+        if (schemeColor?.Val?.HasValue == true)
+        {
+            var schemeName = schemeColor.Val!.InnerText;
+            if (schemeName != null && themeColors.TryGetValue(schemeName, out var themeHex))
+                return ApplyColorTransforms(themeHex, schemeColor);
+        }
+        return null;
     }
 
     // ==================== CSS Helper: Custom Geometry ====================
@@ -206,14 +269,40 @@ public partial class PowerPointHandler
             var color = ResolveFillColor(gs.GetFirstChild<Drawing.SolidFill>(), themeColors);
             if (color == null)
             {
-                // Try direct color children
-                var rgb = gs.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
+                // Try direct color children. A gradient stop carries its color as a
+                // direct <a:srgbClr>/<a:schemeClr> child (not wrapped in solidFill),
+                // and that color may have an <a:alpha> child. Bug #7: read the alpha
+                // and emit rgba() — the old path dropped it, losing transparency.
+                var rgbEl = gs.GetFirstChild<Drawing.RgbColorModelHex>();
+                var rgb = rgbEl?.Val?.Value;
                 if (rgb != null && rgb.Length >= 6 && rgb[..6].All(char.IsAsciiHexDigit))
-                    color = $"#{rgb[..6]}";
+                {
+                    var alpha = rgbEl!.GetFirstChild<Drawing.Alpha>()?.Val?.Value;
+                    if (alpha.HasValue && alpha.Value < 100000)
+                    {
+                        var (r, g, b) = ColorMath.HexToRgb(rgb[..6]);
+                        color = $"rgba({r},{g},{b},{alpha.Value / 100000.0:0.##})";
+                    }
+                    else
+                        color = $"#{rgb[..6]}";
+                }
                 else
                 {
-                    var scheme = gs.GetFirstChild<Drawing.SchemeColor>()?.Val?.InnerText;
-                    color = scheme != null && themeColors.TryGetValue(scheme, out var tc) ? $"#{tc}" : "transparent";
+                    var schemeEl = gs.GetFirstChild<Drawing.SchemeColor>();
+                    var scheme = schemeEl?.Val?.InnerText;
+                    if (scheme != null && themeColors.TryGetValue(scheme, out var tc))
+                    {
+                        var alpha = schemeEl!.GetFirstChild<Drawing.Alpha>()?.Val?.Value;
+                        if (alpha.HasValue && alpha.Value < 100000)
+                        {
+                            var (r, g, b) = ColorMath.HexToRgb(tc);
+                            color = $"rgba({r},{g},{b},{alpha.Value / 100000.0:0.##})";
+                        }
+                        else
+                            color = $"#{tc}";
+                    }
+                    else
+                        color = "transparent";
                 }
             }
             var pos = gs.Position?.Value;
@@ -226,7 +315,30 @@ public partial class PowerPointHandler
         // Radial or linear?
         var pathGrad = gradFill.GetFirstChild<Drawing.PathGradientFill>();
         if (pathGrad != null)
-            return $"radial-gradient(circle, {string.Join(", ", cssStops)})";
+        {
+            // OOXML <a:path path="circle"> with default fill rectangle fills to the shape
+            // bounds (last stop at the edge). CSS default is `farthest-corner`, which overshoots
+            // for square-ish shapes. `closest-side` lands the final stop at the nearer edge,
+            // matching Office's rendering for rectangular shapes.
+            // Bug #6: the gradient FOCUS comes from <a:fillToRect l/t/r/b> (1/1000%
+            // units). The focus point is the rect's top-left (l, t): center =
+            // 50/50/50/50 → at 50% 50%; tl = l0/t0 → at 0% 0%; br = l100000/t100000
+            // → at 100% 100%; tr = l100000/t0 → at 100% 0%. Previously omitted, so
+            // every focal variant rendered centered.
+            var ftr = pathGrad.FillToRectangle;
+            var cx = (ftr?.Left?.Value ?? 50000) / 1000.0;
+            var cy = (ftr?.Top?.Value ?? 50000) / 1000.0;
+            // Size keyword must track the focus: `closest-side` is only right for a
+            // CENTERED focus (the nearer-edge radius that matches Office on a
+            // rectangle). At a corner/edge focus, closest-side's nearest-edge
+            // distance collapses to ~0 → the gradient degenerates to a point and
+            // the focus colors vanish (only the final stop's color shows). Use
+            // `farthest-corner` for off-center foci so the gradient fills the shape
+            // out to its far corner, matching native's large color fill.
+            var centered = Math.Abs(cx - 50) < 0.5 && Math.Abs(cy - 50) < 0.5;
+            var sizeKeyword = centered ? "closest-side" : "farthest-corner";
+            return $"radial-gradient(circle {sizeKeyword} at {cx:0.##}% {cy:0.##}%, {string.Join(", ", cssStops)})";
+        }
 
         var linear = gradFill.GetFirstChild<Drawing.LinearGradientFill>();
         var angleDeg = linear?.Angle?.HasValue == true ? linear.Angle.Value / 60000.0 : 90.0;
@@ -246,9 +358,17 @@ public partial class PowerPointHandler
     {
         if (outline.GetFirstChild<Drawing.NoFill>() != null) return null;
 
+        // Empty <a:ln/> (no fill child, no width) means "inherit/default" — for text
+        // shapes PowerPoint treats this as no line. Without this guard we fall through
+        // to dk1 default + 0.5pt and paint a phantom border on every plain text box.
+        if (outline.GetFirstChild<Drawing.SolidFill>() == null
+            && outline.GetFirstChild<Drawing.GradientFill>() == null
+            && outline.Width?.HasValue != true)
+            return null;
+
         var color = ResolveFillColor(outline.GetFirstChild<Drawing.SolidFill>(), themeColors)
             ?? (themeColors.TryGetValue("dk1", out var dk1Hex) ? $"#{dk1Hex}" : "#000000");
-        var widthPt = outline.Width?.HasValue == true ? outline.Width.Value / 12700.0 : 1.0;
+        var widthPt = outline.Width?.HasValue == true ? outline.Width.Value / EmuConverter.EmuPerPointF : 1.0;
         if (widthPt < 0.5) widthPt = 0.5;
 
         var dash = outline.GetFirstChild<Drawing.PresetDash>();
@@ -284,16 +404,20 @@ public partial class PowerPointHandler
         var w = strokeWidth;
         return dashType switch
         {
+            // Dot is a visible short segment (length = stroke width) with linecap=butt
+            // so the dot renders as a square of side w. Prior implementation used "0.1"
+            // as a zero-length segment relying on stroke-linecap=round to paint a cap;
+            // that collapses when linecap=butt or when stroke-width rounds down.
             "solid" => "",
-            "dot" or "sysDot" => $"0.1 {w * 2.5:0.##}",
+            "dot" or "sysDot" => $"{w:0.##} {w * 2:0.##}",
             "dash" => $"{w * 4:0.##} {w * 3:0.##}",
             "lgDash" => $"{w * 8:0.##} {w * 3:0.##}",
             "sysDash" => $"{w * 3:0.##} {w * 1:0.##}",
-            "dashDot" => $"{w * 4:0.##} {w * 2:0.##} 0.1 {w * 2:0.##}",
-            "lgDashDot" => $"{w * 8:0.##} {w * 2:0.##} 0.1 {w * 2:0.##}",
-            "sysDashDot" => $"{w * 3:0.##} {w * 1.5:0.##} 0.1 {w * 1.5:0.##}",
-            "sysDashDotDot" => $"{w * 3:0.##} {w * 1.5:0.##} 0.1 {w * 1.5:0.##} 0.1 {w * 1.5:0.##}",
-            "lgDashDotDot" => $"{w * 8:0.##} {w * 2:0.##} 0.1 {w * 2:0.##} 0.1 {w * 2:0.##}",
+            "dashDot" => $"{w * 4:0.##} {w * 2:0.##} {w:0.##} {w * 2:0.##}",
+            "lgDashDot" => $"{w * 8:0.##} {w * 2:0.##} {w:0.##} {w * 2:0.##}",
+            "sysDashDot" => $"{w * 3:0.##} {w * 1.5:0.##} {w:0.##} {w * 1.5:0.##}",
+            "sysDashDotDot" => $"{w * 3:0.##} {w * 1.5:0.##} {w:0.##} {w * 1.5:0.##} {w:0.##} {w * 1.5:0.##}",
+            "lgDashDotDot" => $"{w * 8:0.##} {w * 2:0.##} {w:0.##} {w * 2:0.##} {w:0.##} {w * 2:0.##}",
             _ => ""
         };
     }
@@ -313,9 +437,7 @@ public partial class PowerPointHandler
         string color;
         if (rgb != null)
         {
-            var r = Convert.ToInt32(rgb[..2], 16);
-            var g = Convert.ToInt32(rgb[2..4], 16);
-            var b = Convert.ToInt32(rgb[4..6], 16);
+            var (r, g, b) = ColorMath.HexToRgb(rgb);
             color = $"rgba({r},{g},{b},{opacity:0.##})";
         }
         else
@@ -325,9 +447,7 @@ public partial class PowerPointHandler
             var resolved = schemeColor != null && themeColors.TryGetValue(schemeColor, out var sc) ? sc : null;
             if (resolved != null)
             {
-                var r = Convert.ToInt32(resolved[..2], 16);
-                var g = Convert.ToInt32(resolved[2..4], 16);
-                var b = Convert.ToInt32(resolved[4..6], 16);
+                var (r, g, b) = ColorMath.HexToRgb(resolved);
                 color = $"rgba({r},{g},{b},{opacity:0.##})";
             }
             else
@@ -336,8 +456,8 @@ public partial class PowerPointHandler
             }
         }
 
-        var blurPt = shadow.BlurRadius?.HasValue == true ? shadow.BlurRadius.Value / 12700.0 : 0;
-        var distPt = shadow.Distance?.HasValue == true ? shadow.Distance.Value / 12700.0 : 0;
+        var blurPt = shadow.BlurRadius?.HasValue == true ? shadow.BlurRadius.Value / EmuConverter.EmuPerPointF : 0;
+        var distPt = shadow.Distance?.HasValue == true ? shadow.Distance.Value / EmuConverter.EmuPerPointF : 0;
         var angleDeg = shadow.Direction?.HasValue == true ? shadow.Direction.Value / 60000.0 : 0;
         var angleRad = angleDeg * Math.PI / 180;
         var offsetX = distPt * Math.Cos(angleRad);
@@ -357,15 +477,13 @@ public partial class PowerPointHandler
 
         var alpha = glow.Descendants<Drawing.Alpha>().FirstOrDefault()?.Val?.Value ?? 40000;
         var opacity = alpha / 100000.0;
-        var radiusPt = glow.Radius?.HasValue == true ? glow.Radius.Value / 12700.0 : 5;
+        var radiusPt = glow.Radius?.HasValue == true ? glow.Radius.Value / EmuConverter.EmuPerPointF : 5;
 
         var rgb = glow.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
         string color;
         if (rgb != null)
         {
-            var r = Convert.ToInt32(rgb[..2], 16);
-            var g = Convert.ToInt32(rgb[2..4], 16);
-            var b = Convert.ToInt32(rgb[4..6], 16);
+            var (r, g, b) = ColorMath.HexToRgb(rgb);
             color = $"rgba({r},{g},{b},{opacity:0.##})";
         }
         else
@@ -374,9 +492,7 @@ public partial class PowerPointHandler
             var resolved = schemeColor != null && themeColors.TryGetValue(schemeColor, out var sc) ? sc : null;
             if (resolved != null)
             {
-                var r = Convert.ToInt32(resolved[..2], 16);
-                var g = Convert.ToInt32(resolved[2..4], 16);
-                var b = Convert.ToInt32(resolved[4..6], 16);
+                var (r, g, b) = ColorMath.HexToRgb(resolved);
                 color = $"rgba({r},{g},{b},{opacity:0.##})";
             }
             else
@@ -385,9 +501,7 @@ public partial class PowerPointHandler
                 var acc1 = themeColors.TryGetValue("accent1", out var a1) ? a1 : null;
                 if (acc1 != null)
                 {
-                    var r = Convert.ToInt32(acc1[..2], 16);
-                    var g = Convert.ToInt32(acc1[2..4], 16);
-                    var b = Convert.ToInt32(acc1[4..6], 16);
+                    var (r, g, b) = ColorMath.HexToRgb(acc1);
                     color = $"rgba({r},{g},{b},{opacity:0.##})";
                 }
                 else
@@ -415,7 +529,7 @@ public partial class PowerPointHandler
         if (refl == null) return "";
 
         // Distance between shape bottom and reflection start (EMU → pt)
-        var distPt = refl.Distance?.HasValue == true ? refl.Distance.Value / 12700.0 : 0;
+        var distPt = refl.Distance?.HasValue == true ? refl.Distance.Value / EmuConverter.EmuPerPointF : 0;
 
         // StartOpacity: initial opacity of reflected image (thousandths of a percent)
         var startOpacity = refl.StartOpacity?.HasValue == true ? refl.StartOpacity.Value / 100000.0 : 0.52;
@@ -423,17 +537,17 @@ public partial class PowerPointHandler
         // EndAlpha: final opacity (thousandths of a percent)
         var endOpacity = refl.EndAlpha?.HasValue == true ? refl.EndAlpha.Value / 100000.0 : 0.0;
 
-        // EndPosition: how much of the shape height is reflected (thousandths of a percent → CSS percentage)
-        // This controls where the gradient reaches full transparency.
-        var endPos = refl.EndPosition?.HasValue == true ? refl.EndPosition.Value / 1000.0 : 90.0;
+        // EndPosition: how much of the shape height is reflected (thousandths of a percent → CSS percentage).
+        // In -webkit-box-reflect, 0% is the top of the reflection (closest to the source shape) and
+        // 100% is the far edge. The reflection should be most opaque at the top (startOpacity) and
+        // fade to endOpacity at endPos%, then fully transparent beyond endPos.
+        var endPos = refl.EndPosition?.HasValue == true ? Math.Clamp(refl.EndPosition.Value / 1000.0, 0, 100) : 90.0;
 
-        // Map endPos to the gradient: the transparent region starts at (100 - endPos)% of the reflected image
-        // For endPos=55 (tight): fade starts early → reflection visible ~55%
-        // For endPos=90 (half): fade occupies most → reflection visible ~90%
-        // For endPos=100 (full): full height reflection
-        var fadeStartPct = Math.Max(0, 100.0 - endPos);
+        var startStop = $"rgba(255,255,255,{startOpacity:0.###}) 0%";
+        var endStop = $"rgba(255,255,255,{endOpacity:0.###}) {endPos:0.#}%";
+        var tailStop = endPos < 100 ? $",transparent 100%" : "";
 
-        return $"-webkit-box-reflect:below {distPt:0.##}pt linear-gradient(transparent {fadeStartPct:0.#}%,rgba(255,255,255,{startOpacity:0.##}) {100:0.#}%)";
+        return $"-webkit-box-reflect:below {distPt:0.##}pt linear-gradient({startStop},{endStop}{tailStop})";
     }
 
     // ==================== CSS Helper: Preset Geometry ====================
@@ -454,9 +568,93 @@ public partial class PowerPointHandler
     private static string PresetGeometryToCss(string preset) =>
         PresetGeometryToCss(preset, 0, 0, null);
 
+    /// <summary>
+    /// Read an adjustment value from PresetGeometry's AdjustValueList (OOXML "val NNNNN" formula).
+    /// </summary>
+    private static long ReadAdjValueCss(Drawing.PresetGeometry? presetGeom, int index, long defaultValue)
+    {
+        var avList = presetGeom?.GetFirstChild<Drawing.AdjustValueList>();
+        if (avList == null) return defaultValue;
+        var guides = avList.Elements<Drawing.ShapeGuide>().ToList();
+        if (index >= guides.Count) return defaultValue;
+        var formula = guides[index].Formula?.Value;
+        if (formula != null && formula.StartsWith("val "))
+        {
+            if (long.TryParse(formula.AsSpan(4), out var parsed))
+                return parsed;
+        }
+        return defaultValue;
+    }
+
+    /// <summary>
+    /// Build a clip-path polygon for rightArrow honoring OOXML avLst.
+    /// adj1 = tail height relative to shape height (0..100000, default 50000 = 50%)
+    /// adj2 = head width relative to min(w,h) (0..100000, default 50000)
+    /// </summary>
+    private static string RightArrowPolygon(long widthEmu, long heightEmu, Drawing.PresetGeometry? presetGeom)
+    {
+        var adj1 = ReadAdjValueCss(presetGeom, 0, 50000);
+        var adj2 = ReadAdjValueCss(presetGeom, 1, 50000);
+        // Clamp avLst values to sane range
+        if (adj1 < 0) adj1 = 0; if (adj1 > 100000) adj1 = 100000;
+        if (adj2 < 0) adj2 = 0; if (adj2 > 100000) adj2 = 100000;
+
+        // Tail vertical extent (centered on midline): adj1 fraction of height
+        var tailTop = (100000.0 - adj1) / 2000.0;   // e.g. 25%
+        var tailBot = 100.0 - tailTop;              // e.g. 75%
+
+        // Head width measured from the right edge. Fallback to square assumption if dims missing.
+        double headStartX;
+        if (widthEmu > 0 && heightEmu > 0)
+        {
+            var minSide = Math.Min(widthEmu, heightEmu);
+            var headWidthEmu = minSide * adj2 / 100000.0;
+            if (headWidthEmu > widthEmu) headWidthEmu = widthEmu;
+            headStartX = (widthEmu - headWidthEmu) / (double)widthEmu * 100.0;
+        }
+        else
+        {
+            headStartX = 100.0 - adj2 / 1000.0; // fallback: treat adj2 as % of width
+        }
+
+        return $"clip-path:polygon(0 {tailTop:0.##}%,{headStartX:0.##}% {tailTop:0.##}%,{headStartX:0.##}% 0,100% 50%,{headStartX:0.##}% 100%,{headStartX:0.##}% {tailBot:0.##}%,0 {tailBot:0.##}%)";
+    }
+
+    /// <summary>
+    /// Build a clip-path polygon for a 5-point star honoring OOXML adj value.
+    /// adj = inner radius fraction * 50000 (default 19098, giving inner ratio ~0.382).
+    /// Star is stretched to fill bounding box (outer radius = min(w,h)/2 scaled independently to w,h).
+    /// </summary>
+    private static string Star5Polygon(Drawing.PresetGeometry? presetGeom)
+    {
+        var adj = ReadAdjValueCss(presetGeom, 0, 19098);
+        if (adj < 0) adj = 0; if (adj > 50000) adj = 50000;
+        var innerRatio = adj / 50000.0;
+
+        var pts = new List<string>();
+        // 10 points around the center, alternating outer (radius=0.5) and inner (radius=0.5*innerRatio).
+        // Start at top (angle = -90°), step = 36° = PI/5. Scale x,y to 0..100%.
+        for (int i = 0; i < 10; i++)
+        {
+            var angle = -Math.PI / 2 + Math.PI * i / 5;
+            var r = (i % 2 == 0) ? 0.5 : 0.5 * innerRatio;
+            var x = 50.0 + r * Math.Cos(angle) * 100.0;
+            var y = 50.0 + r * Math.Sin(angle) * 100.0;
+            pts.Add($"{x:0.##}% {y:0.##}%");
+        }
+        return $"clip-path:polygon({string.Join(",", pts)})";
+    }
+
     private static string PresetGeometryToCss(string preset, long widthEmu, long heightEmu,
         Drawing.PresetGeometry? presetGeom)
     {
+        // Parametric rightArrow honoring avLst
+        if (preset == "rightArrow")
+            return RightArrowPolygon(widthEmu, heightEmu, presetGeom);
+        // Parametric star5 honoring avLst
+        if (preset == "star5")
+            return Star5Polygon(presetGeom);
+
         // Calculate roundRect corner radius from avLst or default (16.667% of shorter side)
         if (preset is "roundRect" or "round1Rect" or "round2SameRect" or "round2DiagRect")
         {
@@ -640,9 +838,7 @@ public partial class PowerPointHandler
             var alpha = solidFill.GetFirstChild<Drawing.RgbColorModelHex>()?.GetFirstChild<Drawing.Alpha>()?.Val?.Value;
             if (alpha.HasValue && alpha.Value < 100000)
             {
-                var r = Convert.ToInt32(hexPart[..2], 16);
-                var g = Convert.ToInt32(hexPart[2..4], 16);
-                var b = Convert.ToInt32(hexPart[4..6], 16);
+                var (r, g, b) = ColorMath.HexToRgb(hexPart);
                 return $"rgba({r},{g},{b},{alpha.Value / 100000.0:0.##})";
             }
             return $"#{hexPart}";
@@ -697,15 +893,8 @@ public partial class PowerPointHandler
 
     // Unit conversions moved to shared Units class (Core/Units.cs).
 
-    private static string HtmlEncode(string text)
-    {
-        return text
-            .Replace("&", "&amp;")
-            .Replace("<", "&lt;")
-            .Replace(">", "&gt;")
-            .Replace("\"", "&quot;")
-            .Replace("'", "&#39;");
-    }
+    // CONSISTENCY(html-encode): shared plain entity-encoder lives in Core/HtmlPreviewHelper.
+    private static string HtmlEncode(string text) => HtmlPreviewHelper.HtmlEncode(text);
 
     /// <summary>
     /// Sanitize a value for use inside a CSS style attribute.
@@ -729,9 +918,7 @@ public partial class PowerPointHandler
     {
         hex = hex.TrimStart('#');
         if (hex.Length < 6) return false;
-        var r = Convert.ToInt32(hex[..2], 16);
-        var g = Convert.ToInt32(hex[2..4], 16);
-        var b = Convert.ToInt32(hex[4..6], 16);
+        var (r, g, b) = ColorMath.HexToRgb(hex);
         // Relative luminance approximation
         return (r * 0.299 + g * 0.587 + b * 0.114) < 128;
     }

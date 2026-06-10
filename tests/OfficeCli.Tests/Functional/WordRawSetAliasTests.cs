@@ -48,11 +48,10 @@ public class WordRawSetAliasTests : IDisposable
     [Fact]
     public void Word_RawSet_StylesAlias_AppliesMutation()
     {
-        _handler.RawSet("styles", "//w:docDefaults/w:pPrDefault/w:pPr/w:autoSpaceDE", "setattr", "w:val=true");
+        _handler.RawSet("styles", "/*[local-name()='styles']", "setattr", "officecliAlias=true");
 
         var raw = _handler.Raw("/styles");
-        raw.Should().Contain("autoSpaceDE");
-        raw.Should().Contain("w:val=\"true\"");
+        raw.Should().Contain("officecliAlias=\"true\"");
     }
 
     [Fact]

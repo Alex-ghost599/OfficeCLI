@@ -1,21 +1,41 @@
-$repo = "iOfficeAI/OfficeCli"
+$repo = "iOfficeAI/OfficeCLI"
 $asset = "officecli-win-x64.exe"
 $binary = "officecli.exe"
 
+# Mirror primary, github fallback. The mirror is exercised first so issues
+# surface there fast; github is the safety net when CF or the mirror is
+# unreachable.
+$mirrorBase = "https://d.officecli.ai"
+$githubReleaseBase = "https://github.com/$repo/releases/latest/download"
+$githubRawBase = "https://raw.githubusercontent.com/$repo/main"
+
+function Fetch-WithFallback {
+    param([string]$Primary, [string]$Fallback, [string]$OutFile)
+    try {
+        Invoke-WebRequest -Uri $Primary -OutFile $OutFile -TimeoutSec 30 -ErrorAction Stop
+        Write-Host "  (via mirror)"
+        return $true
+    } catch {
+        Write-Host "  mirror unreachable, falling back to github..."
+        try {
+            Invoke-WebRequest -Uri $Fallback -OutFile $OutFile -TimeoutSec 300 -ErrorAction Stop
+            return $true
+        } catch {
+            return $false
+        }
+    }
+}
+
 $source = $null
 
-# Step 1: Try downloading from GitHub
-$url = "https://github.com/$repo/releases/latest/download/$asset"
-$checksumUrl = "https://github.com/$repo/releases/latest/download/SHA256SUMS"
+# Step 1: Try downloading (mirror first, github fallback)
 $tempFile = "$env:TEMP\$binary"
-Write-Host "Downloading OfficeCli..."
-try {
-    Invoke-WebRequest -Uri $url -OutFile $tempFile
+Write-Host "Downloading OfficeCLI..."
+if (Fetch-WithFallback "$mirrorBase/releases/latest/download/$asset" "$githubReleaseBase/$asset" $tempFile) {
     # Verify checksum if available
     $checksumOk = $false
-    try {
-        $checksumFile = "$env:TEMP\officecli-SHA256SUMS"
-        Invoke-WebRequest -Uri $checksumUrl -OutFile $checksumFile
+    $checksumFile = "$env:TEMP\officecli-SHA256SUMS"
+    if (Fetch-WithFallback "$mirrorBase/releases/latest/download/SHA256SUMS" "$githubReleaseBase/SHA256SUMS" $checksumFile) {
         $checksumContent = Get-Content $checksumFile
         $expectedLine = $checksumContent | Where-Object { $_ -match $asset }
         if ($expectedLine) {
@@ -31,7 +51,7 @@ try {
             }
         }
         Remove-Item -Force $checksumFile -ErrorAction SilentlyContinue
-    } catch {
+    } else {
         Write-Host "Checksum file not available, skipping verification."
     }
     $output = & $tempFile --version 2>&1
@@ -39,10 +59,10 @@ try {
         $source = $tempFile
         Write-Host "Download verified."
     } else {
-        Write-Host "Downloaded file is not a valid OfficeCli binary."
+        Write-Host "Downloaded file is not a valid OfficeCLI binary."
         Remove-Item -Force $tempFile -ErrorAction SilentlyContinue
     }
-} catch {
+} else {
     Write-Host "Download failed."
 }
 
@@ -63,7 +83,7 @@ if (-not $source) {
 }
 
 if (-not $source) {
-    Write-Host "Error: Could not find a valid OfficeCli binary."
+    Write-Host "Error: Could not find a valid OfficeCLI binary."
     Write-Host "Download manually from: https://github.com/$repo/releases"
     exit 1
 }
@@ -74,7 +94,7 @@ if ($existing) {
     $installDir = Split-Path $existing.Source
     Write-Host "Found existing installation at $($existing.Source), upgrading..."
 } else {
-    $installDir = "$env:LOCALAPPDATA\OfficeCli"
+    $installDir = "$env:LOCALAPPDATA\OfficeCLI"
 }
 
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
@@ -82,18 +102,50 @@ Copy-Item -Force $source "$installDir\$binary"
 
 Remove-Item -Force $tempFile -ErrorAction SilentlyContinue
 
-Write-Host "OfficeCli installed successfully!"
-Write-Host "Binary path: $installDir\$binary"
-Write-Host "No environment or agent configuration has been changed."
-Write-Host "Optional next step: $installDir\$binary setup"
-
-if (-not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected) {
-    $runSetup = Read-Host "Run optional setup now? [y/N]"
-    if ($runSetup -match '^(?i:y|yes)$') {
-        & "$installDir\$binary" setup
-    } else {
-        Write-Host "Skipped setup. You can run '$installDir\$binary setup' later."
-    }
-} else {
-    Write-Host "Non-interactive install detected. Run '$installDir\$binary setup' later if you want PATH, skills, MCP, or auto-update."
+# Add to PATH if not already there
+$currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($currentPath -notlike "*$installDir*") {
+    [Environment]::SetEnvironmentVariable("Path", "$currentPath;$installDir", "User")
+    Write-Host "Added $installDir to PATH (restart your terminal to take effect)."
 }
+
+# Step 4: Install AI agent skills (first install only)
+$skillMarker = "$installDir\.officecli-skills-installed"
+if (-not (Test-Path $skillMarker)) {
+    $skillTargets = @()
+    $tools = @{
+        "$env:USERPROFILE\.claude" = "Claude Code"
+        "$env:USERPROFILE\.copilot" = "GitHub Copilot"
+        "$env:USERPROFILE\.agents" = "Codex CLI"
+        "$env:USERPROFILE\.cursor" = "Cursor"
+        "$env:USERPROFILE\.windsurf" = "Windsurf"
+        "$env:USERPROFILE\.minimax" = "MiniMax CLI"
+        "$env:USERPROFILE\.openclaw" = "OpenClaw"
+        "$env:USERPROFILE\.nanobot\workspace" = "NanoBot"
+        "$env:USERPROFILE\.zeroclaw\workspace" = "ZeroClaw"
+        "$env:USERPROFILE\.hermes" = "Hermes Agent"
+    }
+    foreach ($dir in $tools.Keys) {
+        if (Test-Path $dir) {
+            $skillTargets += "$dir\skills\officecli"
+            Write-Host "$($tools[$dir]) detected."
+        }
+    }
+
+    if ($skillTargets.Count -gt 0) {
+        Write-Host "Downloading officecli skill..."
+        $tempSkill = "$env:TEMP\officecli-skill.md"
+        if (Fetch-WithFallback "$mirrorBase/SKILL.md" "$githubRawBase/SKILL.md" $tempSkill) {
+            foreach ($target in $skillTargets) {
+                New-Item -ItemType Directory -Force -Path $target | Out-Null
+                Copy-Item -Force $tempSkill "$target\SKILL.md"
+                Write-Host "  Installed: $target\SKILL.md"
+            }
+            Remove-Item -Force $tempSkill -ErrorAction SilentlyContinue
+        }
+    }
+    New-Item -ItemType File -Force -Path $skillMarker | Out-Null
+}
+
+Write-Host "OfficeCLI installed successfully!"
+Write-Host "Run 'officecli --help' to get started."

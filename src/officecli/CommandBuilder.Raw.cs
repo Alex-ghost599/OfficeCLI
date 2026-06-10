@@ -1,8 +1,9 @@
-// Copyright 2025 OfficeCli (officecli.ai)
+// Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
 using System.CommandLine;
 using OfficeCli.Core;
+using OfficeCli.Handlers;
 
 namespace OfficeCli;
 
@@ -111,7 +112,7 @@ static partial class CommandBuilder
     {
         var addPartFileArg = new Argument<string>("file") { Description = "Document file path" };
         var addPartParentArg = new Argument<string>("parent") { Description = "Parent part path (e.g. / for document root, /Sheet1 for Excel sheet, /slide[0] for PPT slide)" };
-        var addPartTypeOpt = new Option<string>("--type") { Description = "Part type to create (chart, header, footer)", Required = true };
+        var addPartTypeOpt = new Option<string>("--type") { Description = "Part type to create. Word: chart, header, footer. PPT/Excel: chart", Required = true };
         var addPartCommand = new Command("add-part", "Create a new document part and return its relationship ID for use with raw-set");
         addPartCommand.Add(addPartFileArg);
         addPartCommand.Add(addPartParentArg);

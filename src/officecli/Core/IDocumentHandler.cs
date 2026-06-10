@@ -1,4 +1,4 @@
-// Copyright 2025 OfficeCli (officecli.ai)
+// Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
 namespace OfficeCli.Core;
@@ -70,9 +70,11 @@ public interface IDocumentHandler : IDisposable
     string Add(string parentPath, string type, InsertPosition? position, Dictionary<string, string> properties);
     /// <summary>
     /// Remove element at path. Returns an optional warning message (e.g. formula cells affected by shift).
+    /// When <paramref name="properties"/> carries trackChange.* keys (Word only, Run/Paragraph in Phase 4),
+    /// the removal is recorded as a w:del revision instead of physically deleted.
     /// </summary>
-    string? Remove(string path);
-    string Move(string sourcePath, string? targetParentPath, InsertPosition? position);
+    string? Remove(string path, Dictionary<string, string>? properties = null);
+    string Move(string sourcePath, string? targetParentPath, InsertPosition? position, Dictionary<string, string>? properties = null);
     string CopyFrom(string sourcePath, string targetParentPath, InsertPosition? position);
 
     // === Raw Layer ===
@@ -88,6 +90,22 @@ public interface IDocumentHandler : IDisposable
     /// Validate the document against OpenXML schema and return any errors.
     /// </summary>
     List<ValidationError> Validate();
+
+    /// <summary>
+    /// Extract the binary payload backing a node (ole/picture/media/embedded)
+    /// to <paramref name="destPath"/>. Returns <c>true</c> if the node has a
+    /// backing part and the bytes were written, <c>false</c> if the node has
+    /// no binary payload (e.g. it is a text paragraph or table cell).
+    /// <paramref name="contentType"/> receives the part's MIME type on success;
+    /// <paramref name="byteCount"/> receives the number of bytes written.
+    /// </summary>
+    bool TryExtractBinary(string path, string destPath, out string? contentType, out long byteCount);
+
+    /// <summary>
+    /// Flush the in-memory OOXML package to disk without ending the session.
+    /// Only meaningful when the handler was opened with editable=true.
+    /// </summary>
+    void Save();
 }
 
 public record ValidationError(string ErrorType, string Description, string? Path, string? Part);

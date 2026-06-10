@@ -70,7 +70,7 @@ public sealed class WatchCliSessionDiscoveryTests
         var getSelected = await harness.RunAsync(TimeSpan.FromSeconds(10), "get", filePath, "selected", "--json");
         getSelected.TimedOut.Should().BeFalse();
         getSelected.ExitCode.Should().Be(0, getSelected.Stderr + getSelected.Stdout);
-        getSelected.Stdout.Should().Contain("\"Matches\": 1");
+        getSelected.Stdout.Should().Contain("\"matches\": 1");
         getSelected.Stdout.Should().Contain("\"path\":");
 
         var markSelected = await harness.RunAsync(

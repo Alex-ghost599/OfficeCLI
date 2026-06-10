@@ -1,4 +1,4 @@
-// Copyright 2025 OfficeCli (officecli.ai)
+// Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
 using DocumentFormat.OpenXml;
@@ -25,59 +25,33 @@ public partial class PowerPointHandler
 
     // ==================== Color Helpers ====================
 
-    /// <summary>
-    /// Parse a color string and return the appropriate OpenXML color element.
-    /// Supports: hex RGB ("FF0000"), theme colors ("accent1", "dk1", "lt1", etc.)
-    /// </summary>
+    // Color/fill builders moved to Core/DrawingColorBuilder so ExcelHandler's
+    // drawing-layer shapes can reuse the same scheme-color resolution.
     private static OpenXmlElement BuildColorElement(string value)
-    {
-        var schemeColor = TryParseSchemeColor(value);
-        if (schemeColor.HasValue)
-            return new Drawing.SchemeColor { Val = schemeColor.Value };
+        => DrawingColorBuilder.BuildColorElement(value);
 
-        var (rgb, alpha) = OfficeCli.Core.ParseHelpers.SanitizeColorForOoxml(value);
-        var colorEl = new Drawing.RgbColorModelHex { Val = rgb };
-        if (alpha.HasValue)
-            colorEl.AppendChild(new Drawing.Alpha { Val = alpha.Value });
-        return colorEl;
-    }
-
-    /// <summary>
-    /// Build a SolidFill element with the appropriate color type.
-    /// </summary>
     private static Drawing.SolidFill BuildSolidFill(string colorValue)
-    {
-        var solidFill = new Drawing.SolidFill();
-        solidFill.Append(BuildColorElement(colorValue));
-        return solidFill;
-    }
+        => DrawingColorBuilder.BuildSolidFill(colorValue);
 
     /// <summary>
-    /// Try to parse a theme/scheme color name. Returns null if it's a hex RGB value.
+    /// Build a <a:duotone> blip recolor element from a "c1,c2" spec.
+    /// Each color may be hex (#RRGGBB / RRGGBB) or a scheme color name
+    /// (accent1, dark1, …); BuildColorElement handles both. Throws on
+    /// any other shape — duotone requires exactly two stops per OOXML.
     /// </summary>
-    private static Drawing.SchemeColorValues? TryParseSchemeColor(string value)
+    internal static Drawing.Duotone BuildDuotoneFromSpec(string spec)
     {
-        return value.ToLowerInvariant().TrimStart('#') switch
-        {
-            "accent1" => Drawing.SchemeColorValues.Accent1,
-            "accent2" => Drawing.SchemeColorValues.Accent2,
-            "accent3" => Drawing.SchemeColorValues.Accent3,
-            "accent4" => Drawing.SchemeColorValues.Accent4,
-            "accent5" => Drawing.SchemeColorValues.Accent5,
-            "accent6" => Drawing.SchemeColorValues.Accent6,
-            "dk1" or "dark1" => Drawing.SchemeColorValues.Dark1,
-            "dk2" or "dark2" => Drawing.SchemeColorValues.Dark2,
-            "lt1" or "light1" => Drawing.SchemeColorValues.Light1,
-            "lt2" or "light2" => Drawing.SchemeColorValues.Light2,
-            "tx1" or "text1" => Drawing.SchemeColorValues.Text1,
-            "tx2" or "text2" => Drawing.SchemeColorValues.Text2,
-            "bg1" or "background1" => Drawing.SchemeColorValues.Background1,
-            "bg2" or "background2" => Drawing.SchemeColorValues.Background2,
-            "hlink" or "hyperlink" => Drawing.SchemeColorValues.Hyperlink,
-            "folhlink" or "followedhyperlink" => Drawing.SchemeColorValues.FollowedHyperlink,
-            _ => null
-        };
+        var parts = spec.Split(',', StringSplitOptions.TrimEntries);
+        if (parts.Length != 2 || string.IsNullOrEmpty(parts[0]) || string.IsNullOrEmpty(parts[1]))
+            throw new ArgumentException($"Invalid 'duotone' value: '{spec}'. Expected 'color1,color2' (hex or scheme color).");
+        var duo = new Drawing.Duotone();
+        duo.AppendChild(BuildColorElement(parts[0]));
+        duo.AppendChild(BuildColorElement(parts[1]));
+        return duo;
     }
+
+    private static Drawing.SchemeColorValues? TryParseSchemeColor(string value)
+        => DrawingColorBuilder.TryParseSchemeColor(value);
 
     /// <summary>
     /// Read a color value from a SolidFill element, returning either hex RGB or scheme color name.
@@ -85,11 +59,62 @@ public partial class PowerPointHandler
     internal static string? ReadColorFromFill(Drawing.SolidFill? solidFill)
     {
         if (solidFill == null) return null;
-        var rgb = solidFill.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
-        if (rgb != null) return ParseHelpers.FormatHexColor(rgb);
-        var scheme = solidFill.GetFirstChild<Drawing.SchemeColor>()?.Val;
-        if (scheme?.HasValue == true) return scheme.InnerText;
+        var rgbEl = solidFill.GetFirstChild<Drawing.RgbColorModelHex>();
+        if (rgbEl?.Val?.Value != null) return AppendColorTransforms(FormatHexWithAlpha(rgbEl), rgbEl);
+        var schemeEl = solidFill.GetFirstChild<Drawing.SchemeColor>();
+        if (schemeEl != null)
+        {
+            // CONSISTENCY(scheme-color-unknown): when the SDK's EnumValue can't
+            // parse the schemeClr@val (custom themes with dk3/lt3/accent7+,
+            // future OOXML additions) .Val.HasValue is false and InnerText is
+            // empty. Fall back to the raw XML attribute so the color survives
+            // round-trip instead of silently disappearing.
+            var schemeVal = schemeEl.Val;
+            string? raw = (schemeVal?.HasValue == true && !string.IsNullOrEmpty(schemeVal.InnerText))
+                ? schemeVal.InnerText
+                : schemeEl.GetAttribute("val", "").Value;
+            if (!string.IsNullOrEmpty(raw))
+            {
+                var name = ParseHelpers.NormalizeSchemeColorName(raw) ?? raw;
+                return AppendColorTransforms(name, schemeEl);
+            }
+        }
         return null;
+    }
+
+    // R8-4: encode a:lumMod / a:lumOff / a:shade / a:tint / a:satMod / a:satOff /
+    // a:hueMod / a:hueOff color transforms as a chained "+name<intPercent>"
+    // suffix on the canonical color string so they survive Get → Add/Set
+    // round-trip. Pre-R8 these children were silently stripped: a slide's
+    // accent1 with lumMod=50000 came back as bare "accent1", and a re-applied
+    // round-trip lost the tint.
+    private static readonly string[] ColorTransformLocalNames =
+        { "lumMod", "lumOff", "shade", "tint", "satMod", "satOff", "hueMod", "hueOff", "alpha" };
+
+    internal static string AppendColorTransforms(string baseColor, OpenXmlElement colorEl)
+    {
+        // a:srgbClr encodes alpha into the trailing AA byte of FormatHexWithAlpha
+        // (RRGGBBAA), so the alpha child is already represented in the base hex.
+        // a:schemeClr has no hex form, so its alpha child has nowhere else to
+        // live and must be emitted as a "+alphaN" transform suffix to survive
+        // round-trip — without this, accent1@alpha50000 came back as bare
+        // "accent1" and re-applying the value lost the transparency.
+        bool isRgb = colorEl is Drawing.RgbColorModelHex;
+        var sb = new System.Text.StringBuilder(baseColor);
+        foreach (var child in colorEl.Elements())
+        {
+            var ln = child.LocalName;
+            if (Array.IndexOf(ColorTransformLocalNames, ln) < 0) continue;
+            if (ln == "alpha" && isRgb) continue; // alpha already encoded into RRGGBBAA hex form
+            var v = child.GetAttribute("val", "").Value;
+            if (string.IsNullOrEmpty(v)) continue;
+            // Convert OOXML ST_PositivePercentage (0..100000) → human percent.
+            if (int.TryParse(v, out var n))
+                sb.Append('+').Append(ln).Append(n / 1000);
+            else
+                sb.Append('+').Append(ln).Append(v);
+        }
+        return sb.ToString();
     }
 
     /// <summary>
@@ -98,19 +123,94 @@ public partial class PowerPointHandler
     internal static string? ReadColorFromElement(OpenXmlElement? parent)
     {
         if (parent == null) return null;
-        var rgb = parent.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
-        if (rgb != null) return ParseHelpers.FormatHexColor(rgb);
-        var scheme = parent.GetFirstChild<Drawing.SchemeColor>()?.Val;
-        if (scheme?.HasValue == true) return scheme.InnerText;
+        var rgbEl = parent.GetFirstChild<Drawing.RgbColorModelHex>();
+        if (rgbEl?.Val?.Value != null) return AppendColorTransforms(FormatHexWithAlpha(rgbEl), rgbEl);
+        var schemeEl = parent.GetFirstChild<Drawing.SchemeColor>();
+        // CONSISTENCY(scheme-color-roundtrip): emit canonical long names
+        // (dark1/light1/hyperlink/…) so OOXML internal short forms
+        // (dk1/lt1/hlink/…) round-trip through Get the same way
+        // ReadColorFromFill normalises them. Without this, shadow/glow/
+        // gradient-stop schemeClr readback surfaced raw InnerText
+        // ("dk1"/"hlink"/…), which Add/Set accepts but Get clients
+        // following the documented vocabulary wouldn't recognise.
+        if (schemeEl != null)
+        {
+            // CONSISTENCY(scheme-color-unknown): mirror ReadColorFromFill —
+            // fall back to the raw @val attribute when EnumValue can't parse it
+            // (custom themes, future OOXML additions).
+            var schemeVal = schemeEl.Val;
+            string? raw = (schemeVal?.HasValue == true && !string.IsNullOrEmpty(schemeVal.InnerText))
+                ? schemeVal.InnerText
+                : schemeEl.GetAttribute("val", "").Value;
+            if (!string.IsNullOrEmpty(raw))
+            {
+                var name = ParseHelpers.NormalizeSchemeColorName(raw) ?? raw;
+                return AppendColorTransforms(name, schemeEl);
+            }
+        }
         return null;
+    }
+
+    /// <summary>
+    /// Format srgbClr hex, prefixing an AA byte when an a:alpha child is present and non-opaque.
+    /// Alpha units are 0..100000 (100000 = opaque, matches OOXML ST_PositiveFixedPercentage).
+    /// </summary>
+    private static string FormatHexWithAlpha(Drawing.RgbColorModelHex rgbEl)
+    {
+        var hex = ParseHelpers.FormatHexColor(rgbEl.Val!.Value!);
+        var alphaVal = rgbEl.GetFirstChild<Drawing.Alpha>()?.Val?.Value;
+        if (alphaVal == null || alphaVal >= 100000) return hex;
+        var alphaByte = (int)Math.Round(alphaVal.Value / 100000.0 * 255);
+        alphaByte = Math.Clamp(alphaByte, 0, 255);
+        // CONSISTENCY(color-input-form): emit CSS #RRGGBBAA so re-feeding the
+        // value into Add/Set round-trips correctly (NormalizeArgbColor /
+        // SanitizeColorForOoxml treat #-prefixed 8-hex as RRGGBBAA).
+        return hex.StartsWith('#')
+            ? $"{hex}{alphaByte:X2}"
+            : $"{hex}{alphaByte:X2}";
     }
 
     private static void ApplyShapeFill(ShapeProperties spPr, string value)
     {
-        // Build new fill element BEFORE removing old one (atomic: no data loss on validation failure)
-        OpenXmlElement newFill = value.Equals("none", StringComparison.OrdinalIgnoreCase)
-            ? new Drawing.NoFill()
-            : BuildSolidFill(value);
+        // CONSISTENCY(fill-gradient-shorthand): accept gradient shorthand
+        // ("C1-C2[-angle]", "radial:C1-C2", "path:C1-C2", and "LINEAR;C1;C2;angle")
+        // directly on fill= — table cells and slide backgrounds already auto-detect
+        // the same shorthand, so shape fill matches that input contract instead of
+        // forcing callers to switch to the parallel gradient= key.
+        var normalized = NormalizeGradientValue(value);
+        OpenXmlElement newFill;
+        if (value.Equals("none", StringComparison.OrdinalIgnoreCase))
+            newFill = new Drawing.NoFill();
+        else if (normalized.StartsWith("radial:", StringComparison.OrdinalIgnoreCase)
+              || normalized.StartsWith("path:", StringComparison.OrdinalIgnoreCase)
+              || IsGradientColorString(normalized))
+            newFill = BuildGradientFill(normalized);
+        else
+        {
+            // CONSISTENCY(scheme-fill-transform-preserve): re-setting the same
+            // scheme color (with no user-supplied +lumMod/+shade suffix) on a
+            // shape that already carries lumMod/lumOff/shade/tint/satMod/hueMod
+            // transforms must NOT strip them — the user expects a no-op when
+            // they re-apply the same theme slot. R49 (756a9a13) only covered
+            // mutations of an UNRELATED shape; this handles the same-shape
+            // case. Skip when the new value carries its own transform chain
+            // ("accent1+lumMod=75000" or "accent1:lumMod=75000") — that's an
+            // explicit overwrite.
+            if (!value.Contains('+') && !value.Contains(':'))
+            {
+                var existingSolid = spPr.GetFirstChild<Drawing.SolidFill>();
+                var existingScheme = existingSolid?.GetFirstChild<Drawing.SchemeColor>();
+                var newScheme = TryParseSchemeColor(value);
+                if (existingScheme != null && newScheme.HasValue
+                    && existingScheme.Val?.Value == newScheme.Value
+                    && existingScheme.Elements().Any(c =>
+                        Array.IndexOf(ColorTransformLocalNames, c.LocalName) >= 0))
+                {
+                    return; // preserve transforms — no-op
+                }
+            }
+            newFill = BuildSolidFill(value);
+        }
 
         spPr.RemoveAllChildren<Drawing.SolidFill>();
         spPr.RemoveAllChildren<Drawing.NoFill>();
@@ -139,6 +239,163 @@ public partial class PowerPointHandler
         spPr.RemoveAllChildren<Drawing.PatternFill>();
         spPr.RemoveAllChildren<Drawing.BlipFill>();
         InsertFillElement(spPr, newFill);
+    }
+
+    /// <summary>
+    /// bt-7 dump→replay raw passthrough for gradient. Value is the captured
+    /// <a:gradFill ...> verbatim including flip= / rotWithShape= attrs and
+    /// any <a:tileRect/> child — attributes BuildGradientFill never re-emits.
+    /// Mirrors the Set.gradientRaw branch so AddShape can consume the same
+    /// key inline at create time rather than relying on a follow-up Set.
+    /// Returns true on success, false on parse failure (caller surfaces as
+    /// unsupported).
+    /// </summary>
+    internal static bool ApplyGradientRaw(ShapeProperties spPr, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        try
+        {
+            var raw = value.Contains("xmlns:a=")
+                ? value
+                : value.Replace("<a:gradFill",
+                    "<a:gradFill xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"");
+            using var sr = new System.IO.StringReader(raw);
+            using var xr = System.Xml.XmlReader.Create(sr);
+            xr.MoveToContent();
+            var grad = new Drawing.GradientFill();
+            if (xr.HasAttributes)
+            {
+                while (xr.MoveToNextAttribute())
+                {
+                    if (xr.Prefix == "xmlns" || xr.Name == "xmlns") continue;
+                    grad.SetAttribute(new OpenXmlAttribute(
+                        xr.Prefix, xr.LocalName, xr.NamespaceURI, xr.Value));
+                }
+                xr.MoveToElement();
+            }
+            var gt = raw.IndexOf('>');
+            var lt = raw.LastIndexOf('<');
+            if (gt > 0 && lt > gt)
+                grad.InnerXml = raw[(gt + 1)..lt];
+            spPr.RemoveAllChildren<Drawing.SolidFill>();
+            spPr.RemoveAllChildren<Drawing.NoFill>();
+            spPr.RemoveAllChildren<Drawing.GradientFill>();
+            spPr.RemoveAllChildren<Drawing.PatternFill>();
+            spPr.RemoveAllChildren<Drawing.BlipFill>();
+            InsertFillElement(spPr, grad);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Apply pattern fill to ShapeProperties.
+    /// Format: "<preset>" or "<preset>:<fgColor>" or "<preset>:<fgColor>:<bgColor>"
+    ///   preset: e.g. pct25, ltHorz, cross, weave, zigZag (Drawing.PresetPatternValues)
+    ///   fgColor / bgColor: lenient hex/named/scheme color (defaults: fg=000000, bg=FFFFFF)
+    /// Examples: "pct25", "ltHorz:FF0000", "cross:red:white"
+    /// </summary>
+    private static void ApplyPatternFill(ShapeProperties spPr, string value)
+    {
+        // Build new fill BEFORE removing old one (atomic: no data loss on invalid input)
+        var newFill = BuildPatternFill(value);
+        spPr.RemoveAllChildren<Drawing.SolidFill>();
+        spPr.RemoveAllChildren<Drawing.NoFill>();
+        spPr.RemoveAllChildren<Drawing.GradientFill>();
+        spPr.RemoveAllChildren<Drawing.PatternFill>();
+        spPr.RemoveAllChildren<Drawing.BlipFill>();
+        InsertFillElement(spPr, newFill);
+    }
+
+    private static Drawing.PatternFill BuildPatternFill(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new ArgumentException("pattern value cannot be empty.");
+
+        var parts = value.Split(':');
+        var presetName = parts[0].Trim();
+        var fg = parts.Length > 1 && !string.IsNullOrWhiteSpace(parts[1]) ? parts[1].Trim() : "000000";
+        var bg = parts.Length > 2 && !string.IsNullOrWhiteSpace(parts[2]) ? parts[2].Trim() : "FFFFFF";
+
+        var patternFill = new Drawing.PatternFill { Preset = ParsePresetPattern(presetName) };
+        // Schema order: fgClr → bgClr
+        var fgClr = new Drawing.ForegroundColor();
+        fgClr.Append(BuildColorElement(fg));
+        patternFill.Append(fgClr);
+        var bgClr = new Drawing.BackgroundColor();
+        bgClr.Append(BuildColorElement(bg));
+        patternFill.Append(bgClr);
+        return patternFill;
+    }
+
+    private static Drawing.PresetPatternValues ParsePresetPattern(string name)
+    {
+        return name.ToLowerInvariant() switch
+        {
+            "pct5" => Drawing.PresetPatternValues.Percent5,
+            "pct10" => Drawing.PresetPatternValues.Percent10,
+            "pct20" => Drawing.PresetPatternValues.Percent20,
+            "pct25" => Drawing.PresetPatternValues.Percent25,
+            "pct30" => Drawing.PresetPatternValues.Percent30,
+            "pct40" => Drawing.PresetPatternValues.Percent40,
+            "pct50" => Drawing.PresetPatternValues.Percent50,
+            "pct60" => Drawing.PresetPatternValues.Percent60,
+            "pct70" => Drawing.PresetPatternValues.Percent70,
+            "pct75" => Drawing.PresetPatternValues.Percent75,
+            "pct80" => Drawing.PresetPatternValues.Percent80,
+            "pct90" => Drawing.PresetPatternValues.Percent90,
+            "dkhorz" => Drawing.PresetPatternValues.DarkHorizontal,
+            "dkvert" => Drawing.PresetPatternValues.DarkVertical,
+            "dkdndiag" => Drawing.PresetPatternValues.DarkDownwardDiagonal,
+            "dkupdiag" => Drawing.PresetPatternValues.DarkUpwardDiagonal,
+            "lthorz" => Drawing.PresetPatternValues.LightHorizontal,
+            "ltvert" => Drawing.PresetPatternValues.LightVertical,
+            "ltdndiag" => Drawing.PresetPatternValues.LightDownwardDiagonal,
+            "ltupdiag" => Drawing.PresetPatternValues.LightUpwardDiagonal,
+            "narhorz" => Drawing.PresetPatternValues.NarrowHorizontal,
+            "narvert" => Drawing.PresetPatternValues.NarrowVertical,
+            "horz" or "horizontal" => Drawing.PresetPatternValues.Horizontal,
+            "vert" or "vertical" => Drawing.PresetPatternValues.Vertical,
+            "dndiag" or "downdiag" => Drawing.PresetPatternValues.DownwardDiagonal,
+            "updiag" => Drawing.PresetPatternValues.UpwardDiagonal,
+            "wdupdiag" => Drawing.PresetPatternValues.WideUpwardDiagonal,
+            "wddndiag" => Drawing.PresetPatternValues.WideDownwardDiagonal,
+            "dashhorz" => Drawing.PresetPatternValues.DashedHorizontal,
+            "dashvert" => Drawing.PresetPatternValues.DashedVertical,
+            "dashdndiag" => Drawing.PresetPatternValues.DashedDownwardDiagonal,
+            "dashupdiag" => Drawing.PresetPatternValues.DashedUpwardDiagonal,
+            "smconfetti" => Drawing.PresetPatternValues.SmallConfetti,
+            "lgconfetti" => Drawing.PresetPatternValues.LargeConfetti,
+            "zigzag" => Drawing.PresetPatternValues.ZigZag,
+            "wave" => Drawing.PresetPatternValues.Wave,
+            "diagbrick" => Drawing.PresetPatternValues.DiagonalBrick,
+            // R9b: `diagStripe` is a common user-facing alias for a diagonal
+            // stripe; OOXML has no literal "diagStripe" token, so map it to the
+            // closest preset (light upward diagonal stripes).
+            "diagstripe" => Drawing.PresetPatternValues.LightUpwardDiagonal,
+            "horzbrick" => Drawing.PresetPatternValues.HorizontalBrick,
+            "weave" => Drawing.PresetPatternValues.Weave,
+            "plaid" => Drawing.PresetPatternValues.Plaid,
+            "divot" => Drawing.PresetPatternValues.Divot,
+            "dotgrid" => Drawing.PresetPatternValues.DotGrid,
+            "dotdiamond" => Drawing.PresetPatternValues.DottedDiamond,
+            "shingle" => Drawing.PresetPatternValues.Shingle,
+            "trellis" => Drawing.PresetPatternValues.Trellis,
+            "sphere" => Drawing.PresetPatternValues.Sphere,
+            "smgrid" => Drawing.PresetPatternValues.SmallGrid,
+            "lggrid" => Drawing.PresetPatternValues.LargeGrid,
+            "smcheck" => Drawing.PresetPatternValues.SmallCheck,
+            "lgcheck" => Drawing.PresetPatternValues.LargeCheck,
+            "openDmnd" or "opendmnd" => Drawing.PresetPatternValues.OpenDiamond,
+            "solidDmnd" or "soliddmnd" => Drawing.PresetPatternValues.SolidDiamond,
+            "cross" => Drawing.PresetPatternValues.Cross,
+            "diagcross" => Drawing.PresetPatternValues.DiagonalCross,
+            _ => throw new ArgumentException(
+                $"Unknown pattern preset: '{name}'. Examples: pct25, ltHorz, cross, diagCross, weave, zigZag, wave, diagBrick, plaid.")
+        };
     }
 
     /// <summary>
@@ -188,17 +445,27 @@ public partial class PowerPointHandler
         }
         else if (parts.Length == 4)
         {
-            var insets = new int[4];
+            // CONSISTENCY(margin-sparse-roundtrip): "-" placeholder means
+            // "leave this side unset" so dump->replay can preserve sparse
+            // source bodyPr (e.g. `lIns=180000 tIns=180000 rIns=150000`
+            // with NO bIns must NOT round-trip into a fabricated
+            // bIns=45720 default). NodeBuilder emits the dash form when
+            // any side is null on the source bodyPr.
             for (int i = 0; i < 4; i++)
             {
-                insets[i] = Core.EmuConverter.ParseEmuAsInt(parts[i].Trim());
-                if (insets[i] > MaxInsetEmu)
-                    throw new ArgumentException($"Inset value {insets[i]} EMU exceeds maximum allowed ({MaxInsetEmu} EMU / ~142cm).");
+                var raw = parts[i].Trim();
+                if (raw == "-" || raw.Length == 0) continue;
+                var v = Core.EmuConverter.ParseEmuAsInt(raw);
+                if (v > MaxInsetEmu)
+                    throw new ArgumentException($"Inset value {v} EMU exceeds maximum allowed ({MaxInsetEmu} EMU / ~142cm).");
+                switch (i)
+                {
+                    case 0: bodyPr.LeftInset = v; break;
+                    case 1: bodyPr.TopInset = v; break;
+                    case 2: bodyPr.RightInset = v; break;
+                    case 3: bodyPr.BottomInset = v; break;
+                }
             }
-            bodyPr.LeftInset = insets[0];
-            bodyPr.TopInset = insets[1];
-            bodyPr.RightInset = insets[2];
-            bodyPr.BottomInset = insets[3];
         }
         else
         {
@@ -286,7 +553,7 @@ public partial class PowerPointHandler
             "roundrect" or "roundedrectangle" => Drawing.ShapeTypeValues.RoundRectangle,
             "ellipse" or "oval" => Drawing.ShapeTypeValues.Ellipse,
             "triangle" => Drawing.ShapeTypeValues.Triangle,
-            "rtriangle" or "righttriangle" => Drawing.ShapeTypeValues.RightTriangle,
+            "rtriangle" or "righttriangle" or "rttriangle" => Drawing.ShapeTypeValues.RightTriangle,
             "diamond" => Drawing.ShapeTypeValues.Diamond,
             "parallelogram" => Drawing.ShapeTypeValues.Parallelogram,
             "trapezoid" => Drawing.ShapeTypeValues.Trapezoid,
@@ -303,7 +570,9 @@ public partial class PowerPointHandler
             "star16" => Drawing.ShapeTypeValues.Star16,
             "star24" => Drawing.ShapeTypeValues.Star24,
             "star32" => Drawing.ShapeTypeValues.Star32,
-            "rightarrow" or "rarrow" => Drawing.ShapeTypeValues.RightArrow,
+            // "arrow" alias mirrors PowerPoint's "Arrow: Right" UI label —
+            // the unqualified short form users naturally reach for.
+            "rightarrow" or "rarrow" or "arrow" => Drawing.ShapeTypeValues.RightArrow,
             "leftarrow" or "larrow" => Drawing.ShapeTypeValues.LeftArrow,
             "uparrow" => Drawing.ShapeTypeValues.UpArrow,
             "downarrow" => Drawing.ShapeTypeValues.DownArrow,
@@ -367,21 +636,137 @@ public partial class PowerPointHandler
             "stripedrightarrow" => Drawing.ShapeTypeValues.StripedRightArrow,
             "uturnarrow" => Drawing.ShapeTypeValues.UTurnArrow,
             "circulararrow" => Drawing.ShapeTypeValues.CircularArrow,
-            _ => throw new ArgumentException(
-                $"Unknown preset shape: '{name}'. Common presets: rect, roundRect, ellipse, triangle, diamond, " +
-                "pentagon, hexagon, star5, rightArrow, leftArrow, chevron, plus, heart, cloud, cube, can, line, " +
-                "callout, process, decision, smiley, frame, gear6")
+            // ParsePresetShape can't enumerate all ~180 OOXML preset values by hand.
+            // Fall back to reflection lookup on Drawing.ShapeTypeValues static
+            // properties so dump-replay survives preset names absent from the
+            // hand-rolled list (pie, chord, blockArc, mathDivide, callouts, …).
+            // Last-resort degrade is Rectangle so a single missing preset never
+            // takes the whole shape add down (which would cascade positional refs).
+            _ => ResolveShapeTypeByReflection(name) ?? Drawing.ShapeTypeValues.Rectangle,
         };
 
+    private static Drawing.ShapeTypeValues? ResolveShapeTypeByReflection(string name)
+    {
+        var lower = name.ToLowerInvariant();
+        var props = typeof(Drawing.ShapeTypeValues).GetProperties(
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+        foreach (var p in props)
+        {
+            if (p.PropertyType != typeof(Drawing.ShapeTypeValues)) continue;
+            if (string.Equals(p.Name, lower, StringComparison.OrdinalIgnoreCase))
+                return (Drawing.ShapeTypeValues?)p.GetValue(null);
+        }
+        return null;
+    }
+
+    // Strict variant used by Set to surface unknown preset names as an
+    // unsupported_property error instead of silently degrading to Rectangle.
+    // ParsePresetShape's last-resort degrade exists so a single bad preset
+    // never takes a whole shape add (and its positional refs) down on import,
+    // but Set is a single-property mutation — silently rewriting the user's
+    // geometry to a rectangle is a worse outcome than telling them the name
+    // wasn't recognised.
+    internal static bool TryParsePresetShape(string name, out Drawing.ShapeTypeValues value)
+    {
+        try
+        {
+            var explicitHit = ParsePresetShape(name);
+            // ParsePresetShape returns Rectangle for unknown names — to
+            // distinguish a real "rect" input from the degraded fallback,
+            // also check the explicit alias list / reflection path.
+            var lower = name.ToLowerInvariant();
+            if (lower is "rect" or "rectangle") { value = explicitHit; return true; }
+            if (ResolveShapeTypeByReflection(name) != null) { value = explicitHit; return true; }
+            // Heuristic: if ParsePresetShape gave us anything other than the
+            // Rectangle fallback, it matched a hand-rolled alias. (Rectangle
+            // is the only fallback target, so any non-Rectangle return is a
+            // real hit; a Rectangle return without "rect"/"rectangle" input
+            // is the silent degrade we want to reject.)
+            if (explicitHit != Drawing.ShapeTypeValues.Rectangle) { value = explicitHit; return true; }
+            value = explicitHit;
+            return false;
+        }
+        catch
+        {
+            value = Drawing.ShapeTypeValues.Rectangle;
+            return false;
+        }
+    }
+
+    // BUG-FIX(B8): canonical names mirror OOXML LineEndValues so that the
+    // value passed to Add/Set round-trips through Get. The previous mapping
+    // had 'arrow' → Triangle (input) but Get emitted the OOXML name 'arrow'
+    // for LineEndValues.Arrow, producing input/output asymmetry. Aliases
+    // (open/closed/circle) are accepted but Get always returns the canonical
+    // OOXML token (triangle, arrow, stealth, diamond, oval, none).
     private static Drawing.LineEndValues ParseLineEndType(string name) =>
         name.ToLowerInvariant() switch
         {
-            "triangle" or "arrow" => Drawing.LineEndValues.Triangle,
+            "triangle" or "closed" => Drawing.LineEndValues.Triangle,
             "stealth" => Drawing.LineEndValues.Stealth,
             "diamond" => Drawing.LineEndValues.Diamond,
             "oval" or "circle" => Drawing.LineEndValues.Oval,
-            "open" => Drawing.LineEndValues.Arrow,
+            "arrow" or "open" => Drawing.LineEndValues.Arrow,
             "none" => Drawing.LineEndValues.None,
-            _ => Drawing.LineEndValues.Triangle
+            _ => throw new ArgumentException(
+                $"Invalid line end type: '{name}'. Valid values: triangle, arrow, stealth, diamond, oval, none.")
         };
+
+    // full prstDash enum (was clipped to 6 of 11 values; sysDot/sysDash/
+    // sysDashDot/sysDashDotDot/lgDashDotDot threw "Invalid lineDash"). Mirrors
+    // ST_PresetLineDashVal (DrawingML §20.1.10.49). Accepts canonical OOXML
+    // tokens plus longstanding 'longdash[dot]' aliases for backward compat.
+    internal static Drawing.PresetLineDashValues ParseLineDashValue(string value) =>
+        value.ToLowerInvariant() switch
+        {
+            "solid" => Drawing.PresetLineDashValues.Solid,
+            "dot" => Drawing.PresetLineDashValues.Dot,
+            "dash" => Drawing.PresetLineDashValues.Dash,
+            "dashdot" or "dash_dot" => Drawing.PresetLineDashValues.DashDot,
+            "lgdash" or "lg_dash" or "longdash" => Drawing.PresetLineDashValues.LargeDash,
+            "lgdashdot" or "lg_dash_dot" or "longdashdot" => Drawing.PresetLineDashValues.LargeDashDot,
+            "lgdashdotdot" or "lg_dash_dot_dot" or "longdashdotdot" => Drawing.PresetLineDashValues.LargeDashDotDot,
+            "sysdot" or "sys_dot" => Drawing.PresetLineDashValues.SystemDot,
+            "sysdash" or "sys_dash" => Drawing.PresetLineDashValues.SystemDash,
+            "sysdashdot" or "sys_dash_dot" => Drawing.PresetLineDashValues.SystemDashDot,
+            "sysdashdotdot" or "sys_dash_dot_dot" => Drawing.PresetLineDashValues.SystemDashDotDot,
+            _ => throw new ArgumentException(
+                $"Invalid 'lineDash' value: '{value}'. Valid values: solid, dot, dash, dashdot, lgDash, lgDashDot, lgDashDotDot, sysDot, sysDash, sysDashDot, sysDashDotDot.")
+        };
+
+    // R64 bt-3: Parse a verbatim <a:custDash>…</a:custDash> string and
+    // reconstruct a typed Drawing.CustomDash. Mirrors the lift-attrs +
+    // InnerXml pattern used by shadowRaw / fillOverlayRaw / effectDagRaw /
+    // effectsRaw passthrough installs in ShapeProperties — keeps a single
+    // round-trip strategy for "no compressible string form" OOXML children.
+    // <a:custDash> itself has no attributes; the payload is <a:ds d="N" sp="N"/>
+    // stops.
+    internal static Drawing.CustomDash BuildCustomDashFromRaw(string raw)
+    {
+        var xml = raw.Contains("xmlns:a=")
+            ? raw
+            : raw.Replace("<a:custDash",
+                "<a:custDash xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"");
+        var custDash = new Drawing.CustomDash();
+        using var sr = new System.IO.StringReader(xml);
+        using var xr = System.Xml.XmlReader.Create(sr);
+        xr.MoveToContent();
+        if (xr.HasAttributes)
+        {
+            while (xr.MoveToNextAttribute())
+            {
+                if (xr.Prefix == "xmlns" || xr.Name == "xmlns") continue;
+                custDash.SetAttribute(new OpenXmlAttribute(
+                    xr.Prefix, xr.LocalName, xr.NamespaceURI, xr.Value));
+            }
+            xr.MoveToElement();
+        }
+        if (!xr.IsEmptyElement)
+        {
+            var inner = xr.ReadInnerXml();
+            if (!string.IsNullOrWhiteSpace(inner))
+                custDash.InnerXml = inner;
+        }
+        return custDash;
+    }
 }
