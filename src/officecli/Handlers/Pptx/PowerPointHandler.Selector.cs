@@ -368,19 +368,10 @@ public partial class PowerPointHandler
             }
             else
             {
-                // [attr=value]: must exist and equal.
-                // CONSISTENCY(attr-miss-warn): when the key is absent, return
-                // true here (pass-through) so AttributeFilter.ApplyWithWarnings
-                // sees nodes.Count > 0 and emits the "filter key not found"
-                // warning. The CLI/Resident/MCP all post-filter through
-                // AttributeFilter which then rejects the node via MatchOne
-                // (!hasKey → false), so the final result set is identical.
-                // Direct Query() consumers don't use attribute filters; the
-                // pre-filter here was an optimisation, not a correctness gate.
-                // Without this pass-through, [foo=bar] silently returned empty
-                // with no warning, while the symmetric [foo] presence form
-                // warned because it parsed via the AttributeFilter path only.
-                if (!hasKey) continue;
+                // [attr=value]: direct Query() consumers rely on this method as
+                // the final correctness gate, so absent attributes must not
+                // match. CLI layers can still add their own warning pass.
+                if (!hasKey) return false;
                 var matches = isNameKey ? MatchesShapeName(actualStr, expected) : NormalizedEquals(actualStr, expected);
                 if (!matches)
                 {
