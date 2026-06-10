@@ -5,6 +5,7 @@ using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using OfficeCli.Core;
+using System.Text.RegularExpressions;
 
 namespace OfficeCli.Handlers;
 
@@ -396,7 +397,9 @@ public partial class WordHandler : IDocumentHandler
             return xml;
         }
 
-        return partPath.ToLowerInvariant() switch
+        var normalizedPartPath = NormalizeWordRawPartPath(partPath);
+
+        return normalizedPartPath.ToLowerInvariant() switch
         {
             "/document" => mainPart.Document?.OuterXml ?? "",
             "/styles" => mainPart.StyleDefinitionsPart?.Styles?.OuterXml ?? "(no styles)",
@@ -404,9 +407,9 @@ public partial class WordHandler : IDocumentHandler
             "/numbering" => mainPart.NumberingDefinitionsPart?.Numbering?.OuterXml ?? "(no numbering)",
             "/comments" => mainPart.WordprocessingCommentsPart?.Comments?.OuterXml ?? "(no comments)",
             "/theme" => mainPart.ThemePart?.Theme?.OuterXml ?? "(no theme)",
-            _ when partPath.StartsWith("/header") => GetHeaderRawXml(partPath),
-            _ when partPath.StartsWith("/footer") => GetFooterRawXml(partPath),
-            _ when partPath.StartsWith("/chart") => GetChartRawXml(partPath),
+            _ when normalizedPartPath.StartsWith("/header", StringComparison.OrdinalIgnoreCase) => GetHeaderRawXml(normalizedPartPath),
+            _ when normalizedPartPath.StartsWith("/footer", StringComparison.OrdinalIgnoreCase) => GetFooterRawXml(normalizedPartPath),
+            _ when normalizedPartPath.StartsWith("/chart", StringComparison.OrdinalIgnoreCase) => GetChartRawXml(normalizedPartPath),
             _ => throw new ArgumentException($"Unknown part: {partPath}. Available: /document, /styles, /settings, /numbering, /comments, /theme, /header[n], /footer[n], /chart[n]")
         };
     }
@@ -431,7 +434,8 @@ public partial class WordHandler : IDocumentHandler
         }
 
         OpenXmlPartRootElement rootElement;
-        var lowerPath = partPath.ToLowerInvariant();
+        var normalizedPartPath = NormalizeWordRawPartPath(partPath);
+        var lowerPath = normalizedPartPath.ToLowerInvariant();
 
         if (lowerPath is "/document" or "/")
             rootElement = mainPart.Document ?? throw new InvalidOperationException("No document");
@@ -472,9 +476,9 @@ public partial class WordHandler : IDocumentHandler
         else if (lowerPath.StartsWith("/header"))
         {
             var idx = 0;
-            var bracketIdx = partPath.IndexOf('[');
+            var bracketIdx = normalizedPartPath.IndexOf('[');
             if (bracketIdx >= 0)
-                int.TryParse(partPath[(bracketIdx + 1)..].TrimEnd(']'), out idx);
+                int.TryParse(normalizedPartPath[(bracketIdx + 1)..].TrimEnd(']'), out idx);
             var headerPart = mainPart.HeaderParts.ElementAtOrDefault(idx - 1)
                 ?? throw new ArgumentException($"header[{idx}] not found");
             rootElement = headerPart.Header ?? throw new InvalidOperationException($"Corrupt file: header[{idx}] data missing");
@@ -482,9 +486,9 @@ public partial class WordHandler : IDocumentHandler
         else if (lowerPath.StartsWith("/footer"))
         {
             var idx = 0;
-            var bracketIdx = partPath.IndexOf('[');
+            var bracketIdx = normalizedPartPath.IndexOf('[');
             if (bracketIdx >= 0)
-                int.TryParse(partPath[(bracketIdx + 1)..].TrimEnd(']'), out idx);
+                int.TryParse(normalizedPartPath[(bracketIdx + 1)..].TrimEnd(']'), out idx);
             var footerPart = mainPart.FooterParts.ElementAtOrDefault(idx - 1)
                 ?? throw new ArgumentException($"footer[{idx}] not found");
             rootElement = footerPart.Footer ?? throw new InvalidOperationException($"Corrupt file: footer[{idx}] data missing");
@@ -492,9 +496,9 @@ public partial class WordHandler : IDocumentHandler
         else if (lowerPath.StartsWith("/chart"))
         {
             var idx = 0;
-            var bracketIdx = partPath.IndexOf('[');
+            var bracketIdx = normalizedPartPath.IndexOf('[');
             if (bracketIdx >= 0)
-                int.TryParse(partPath[(bracketIdx + 1)..].TrimEnd(']'), out idx);
+                int.TryParse(normalizedPartPath[(bracketIdx + 1)..].TrimEnd(']'), out idx);
             var chartPart = mainPart.ChartParts.ElementAtOrDefault(idx - 1)
                 ?? throw new ArgumentException($"chart[{idx}] not found");
             rootElement = chartPart.ChartSpace ?? throw new InvalidOperationException($"Corrupt file: chart[{idx}] data missing");
@@ -552,6 +556,25 @@ public partial class WordHandler : IDocumentHandler
         // their own structured message. Writing here pollutes batch --json
         // output (extra stdout lines escaped into result.message strings).
         _ = affected;
+    }
+
+    private static string NormalizeWordRawPartPath(string partPath)
+    {
+        if (string.IsNullOrWhiteSpace(partPath))
+            return partPath;
+
+        var normalized = partPath.Trim();
+        if (!normalized.StartsWith('/'))
+            normalized = "/" + normalized;
+
+        var match = Regex.Match(
+            normalized,
+            @"^/(?<kind>header|footer|chart)(?<index>\d+)$",
+            RegexOptions.IgnoreCase);
+        if (match.Success)
+            return $"/{match.Groups["kind"].Value.ToLowerInvariant()}[{match.Groups["index"].Value}]";
+
+        return normalized;
     }
 
     /// <summary>

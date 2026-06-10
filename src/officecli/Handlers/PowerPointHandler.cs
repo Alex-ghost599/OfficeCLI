@@ -203,7 +203,22 @@ public partial class PowerPointHandler : IDocumentHandler
                 ?? throw new ArgumentException("No notes master part");
         }
 
-        throw new ArgumentException($"Unknown part: {partPath}. Available: /presentation, /theme, /slide[N], /slideMaster[N], /slideLayout[N], /noteSlide[N], /notesMaster");
+        var chartMatch = Regex.Match(partPath, @"^/slide\[(\d+)\]/chart\[(\d+)\]$");
+        if (chartMatch.Success)
+        {
+            var slideIdx = int.Parse(chartMatch.Groups[1].Value);
+            var chartIdx = int.Parse(chartMatch.Groups[2].Value);
+            var slideParts = GetSlideParts().ToList();
+            if (slideIdx < 1 || slideIdx > slideParts.Count)
+                throw new ArgumentException($"slide[{slideIdx}] not found (total: {slideParts.Count})");
+            var chartParts = slideParts[slideIdx - 1].ChartParts.ToList();
+            if (chartIdx < 1 || chartIdx > chartParts.Count)
+                throw new ArgumentException($"chart[{chartIdx}] not found on slide[{slideIdx}] (total: {chartParts.Count})");
+            return chartParts[chartIdx - 1].ChartSpace?.OuterXml
+                ?? throw new InvalidOperationException("Corrupt file: chart data missing");
+        }
+
+        throw new ArgumentException($"Unknown part: {partPath}. Available: /presentation, /theme, /slide[N], /slide[N]/chart[M], /slideMaster[N], /slideLayout[N], /noteSlide[N], /notesMaster");
     }
 
     public void RawSet(string partPath, string xpath, string action, string? xml)
@@ -307,6 +322,19 @@ public partial class PowerPointHandler : IDocumentHandler
             rootElement = notesPart.NotesSlide
                 ?? throw new InvalidOperationException("Corrupt file: notes slide data missing");
         }
+        else if (Regex.Match(partPath, @"^/slide\[(\d+)\]/chart\[(\d+)\]$") is { Success: true } chartMatch)
+        {
+            var slideIdx = int.Parse(chartMatch.Groups[1].Value);
+            var chartIdx = int.Parse(chartMatch.Groups[2].Value);
+            var slideParts = GetSlideParts().ToList();
+            if (slideIdx < 1 || slideIdx > slideParts.Count)
+                throw new ArgumentException($"Slide {slideIdx} not found (total: {slideParts.Count})");
+            var chartParts = slideParts[slideIdx - 1].ChartParts.ToList();
+            if (chartIdx < 1 || chartIdx > chartParts.Count)
+                throw new ArgumentException($"Chart {chartIdx} not found on slide {slideIdx} (total: {chartParts.Count})");
+            rootElement = chartParts[chartIdx - 1].ChartSpace
+                ?? throw new InvalidOperationException("Corrupt file: chart data missing");
+        }
         else if (partPath == "/notesMaster")
         {
             // CONSISTENCY(grow-on-rawset): blank pptx files have no
@@ -348,7 +376,7 @@ public partial class PowerPointHandler : IDocumentHandler
         }
         else
         {
-            throw new ArgumentException($"Unknown part: {partPath}. Available: /presentation, /theme, /slide[N], /slideMaster[N], /slideLayout[N], /noteSlide[N], /notesMaster");
+            throw new ArgumentException($"Unknown part: {partPath}. Available: /presentation, /theme, /slide[N], /slide[N]/chart[M], /slideMaster[N], /slideLayout[N], /noteSlide[N], /notesMaster");
         }
 
         var affected = RawXmlHelper.Execute(rootElement, xpath, action, xml);
@@ -561,13 +589,7 @@ public partial class PowerPointHandler : IDocumentHandler
                 var chartPart = slidePart.AddNewPart<DocumentFormat.OpenXml.Packaging.ChartPart>();
                 var relId = slidePart.GetIdOfPart(chartPart);
 
-                chartPart.ChartSpace = new DocumentFormat.OpenXml.Drawing.Charts.ChartSpace(
-                    new DocumentFormat.OpenXml.Drawing.Charts.Chart(
-                        new DocumentFormat.OpenXml.Drawing.Charts.PlotArea(
-                            new DocumentFormat.OpenXml.Drawing.Charts.Layout()
-                        )
-                    )
-                );
+                chartPart.ChartSpace = ChartHelper.BuildPlaceholderChartSpace();
                 chartPart.ChartSpace.Save();
 
                 var chartIdx = slidePart.ChartParts.ToList().IndexOf(chartPart);

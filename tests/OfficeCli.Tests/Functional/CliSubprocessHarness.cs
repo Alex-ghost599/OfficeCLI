@@ -142,9 +142,19 @@ internal sealed class CliSubprocessHarness : IDisposable
 
     private static string ResolveCliExecutablePath()
     {
+        var overridePath = Environment.GetEnvironmentVariable("OFFICECLI_TEST_CLI");
+        if (!string.IsNullOrWhiteSpace(overridePath) && File.Exists(overridePath))
+            return overridePath;
+
         var repoRoot = GetRepositoryRoot();
+        var baseDir = new DirectoryInfo(AppContext.BaseDirectory.TrimEnd(
+            Path.DirectorySeparatorChar,
+            Path.AltDirectorySeparatorChar));
+        var configuration = baseDir.Parent?.Name ?? "Debug";
         var candidates = new[]
         {
+            Path.Combine(repoRoot, "src", "officecli", "bin", configuration, "net10.0", "osx-arm64", "officecli"),
+            Path.Combine(repoRoot, "src", "officecli", "bin", configuration, "net10.0", "officecli"),
             Path.Combine(repoRoot, "src", "officecli", "bin", "Release", "net10.0", "osx-arm64", "officecli"),
             Path.Combine(repoRoot, "src", "officecli", "bin", "Release", "net10.0", "officecli")
         };

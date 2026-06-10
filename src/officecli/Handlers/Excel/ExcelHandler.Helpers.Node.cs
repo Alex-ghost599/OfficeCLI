@@ -372,10 +372,15 @@ public partial class ExcelHandler
                         if (fonts != null && fontId < (uint)fonts.Elements<Font>().Count())
                         {
                             var font = fonts.Elements<Font>().ElementAt((int)fontId);
-                            if (font.Bold != null) { node.Format["font.bold"] = true; }
+                            if (font.Bold != null)
+                            {
+                                node.Format["font.bold"] = true;
+                                node.Format["bold"] = true;
+                            }
                             if (font.Italic != null)
                             {
                                 node.Format["font.italic"] = true;
+                                node.Format["italic"] = true;
                             }
                             // Canonical cell keys are `strike`/`underline` (schema cell.json);
                             // `font.strike`/`font.underline` are declared aliases. Get must

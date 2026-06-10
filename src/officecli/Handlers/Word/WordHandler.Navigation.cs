@@ -240,6 +240,7 @@ public partial class WordHandler
                 if (margins.Header?.Value != null) node.Format["marginHeader"] = FormatTwipsToCm(margins.Header.Value);
                 if (margins.Footer?.Value != null) node.Format["marginFooter"] = FormatTwipsToCm(margins.Footer.Value);
                 if (margins.Gutter?.Value != null) node.Format["marginGutter"] = FormatTwipsToCm(margins.Gutter.Value);
+                AddWordSectionLegacyAliases(node);
             }
 
             // CONSISTENCY(root-vs-section-readback): the body-level sectPr surfaced at /
@@ -3444,6 +3445,7 @@ public partial class WordHandler
             // didn't consume. Symmetric with the Set-side TryCreateTypedChild
             // fallback in SetElementParagraph (WordHandler.Set.Element.cs).
             FillUnknownChildProps(pProps, node);
+            AddWordParagraphLegacyAliases(node);
 
             // CONSISTENCY(add-set-symmetry): inline section break.
             // A paragraph carrying <w:sectPr> inside its <w:pPr> is the

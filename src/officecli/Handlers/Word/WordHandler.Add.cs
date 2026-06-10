@@ -536,10 +536,7 @@ public partial class WordHandler
             case "chart":
                 var chartPart = mainPart.AddNewPart<ChartPart>();
                 var relId = mainPart.GetIdOfPart(chartPart);
-                // Initialize with minimal valid ChartSpace
-                chartPart.ChartSpace = new C.ChartSpace(
-                    new C.Chart(new C.PlotArea(new C.Layout()))
-                );
+                chartPart.ChartSpace = Core.ChartHelper.BuildPlaceholderChartSpace();
                 chartPart.ChartSpace.Save();
                 var chartIdx = mainPart.ChartParts.ToList().IndexOf(chartPart);
                 return (relId, $"/chart[{chartIdx + 1}]");

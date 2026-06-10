@@ -951,6 +951,7 @@ public partial class WordHandler
         if (margin?.Header?.Value != null) secNode.Format["marginHeader"] = FormatTwipsToCm(margin.Header.Value);
         if (margin?.Footer?.Value != null) secNode.Format["marginFooter"] = FormatTwipsToCm(margin.Footer.Value);
         if (margin?.Gutter?.Value != null) secNode.Format["marginGutter"] = FormatTwipsToCm(margin.Gutter.Value);
+        AddWordSectionLegacyAliases(secNode);
 
         // Page numbering start (w:pgNumType/@start) and format (w:pgNumType/@fmt)
         var pgNumType = sectPr.GetFirstChild<PageNumberType>();

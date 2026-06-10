@@ -46,7 +46,7 @@ public sealed class ResidentCliLifecycleTests
         var open2 = await harness.RunAsync(TimeSpan.FromSeconds(15), "open", path);
         open2.TimedOut.Should().BeFalse();
         open2.ExitCode.Should().Be(0, open2.Stderr + open2.Stdout);
-        open2.Stdout.Should().Contain("already running");
+        open2.Stdout.Should().Contain("reusing running resident");
 
         var close = await harness.RunAsync(TimeSpan.FromSeconds(15), "close", path);
         close.TimedOut.Should().BeFalse();

@@ -136,8 +136,20 @@ internal class WatchServer : IDisposable
         if (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())
             fullPath = fullPath.ToUpperInvariant();
         var hash = Convert.ToHexString(
-            System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(fullPath)))[..16];
-        return $"officecli-watch-{hash}";
+            System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(fullPath)));
+        return $"ocw-{hash[..12]}";
+    }
+
+    public static IEnumerable<string> GetWatchPipeCandidates(string filePath)
+    {
+        var fullPath = Path.GetFullPath(filePath);
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())
+            fullPath = fullPath.ToUpperInvariant();
+        var hash = Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(fullPath)));
+        yield return $"ocw-{hash[..12]}";
+        yield return $"ocw-{hash[..16]}";
+        yield return $"officecli-watch-{hash[..16]}";
     }
 
     /// <summary>
@@ -152,6 +164,12 @@ internal class WatchServer : IDisposable
         return Path.Combine(Path.GetTempPath(), GetWatchPipeName(filePath) + ".port");
     }
 
+    private static IEnumerable<string> GetWatchMarkerCandidates(string filePath)
+    {
+        foreach (var pipeName in GetWatchPipeCandidates(filePath))
+            yield return Path.Combine(Path.GetTempPath(), pipeName + ".port");
+    }
+
     /// <summary>
     /// Check if another watch process is already running for this file.
     /// Returns the port number if running, or null if not.
@@ -163,27 +181,30 @@ internal class WatchServer : IDisposable
     /// </summary>
     public static int? GetExistingWatchPort(string filePath)
     {
-        var markerPath = GetWatchMarkerPath(filePath);
-        try
+        foreach (var markerPath in GetWatchMarkerCandidates(filePath))
         {
-            if (!File.Exists(markerPath)) return null;
-            var lines = File.ReadAllLines(markerPath);
-            if (lines.Length < 2) return null;
-            if (!int.TryParse(lines[0], out var pid)) return null;
-            if (!int.TryParse(lines[1], out var port)) return null;
-            if (!IsProcessAlive(pid))
+            try
             {
-                // Stale marker — writer crashed or was killed without cleanup.
-                // Best-effort remove so the caller can start a fresh watch.
-                try { File.Delete(markerPath); } catch { }
-                return null;
+                if (!File.Exists(markerPath)) continue;
+                var lines = File.ReadAllLines(markerPath);
+                if (lines.Length < 2) continue;
+                if (!int.TryParse(lines[0], out var pid)) continue;
+                if (!int.TryParse(lines[1], out var port)) continue;
+                if (!IsProcessAlive(pid))
+                {
+                    // Stale marker — writer crashed or was killed without cleanup.
+                    // Best-effort remove so the caller can start a fresh watch.
+                    try { File.Delete(markerPath); } catch { }
+                    continue;
+                }
+                return port;
             }
-            return port;
+            catch
+            {
+                // try next candidate
+            }
         }
-        catch
-        {
-            return null;
-        }
+        return null;
     }
 
     public static bool IsWatching(string filePath)
@@ -215,12 +236,14 @@ internal class WatchServer : IDisposable
 
     private void DeleteMarker()
     {
-        try
+        foreach (var markerPath in GetWatchMarkerCandidates(_filePath))
         {
-            var markerPath = GetWatchMarkerPath(_filePath);
-            if (File.Exists(markerPath)) File.Delete(markerPath);
+            try
+            {
+                if (File.Exists(markerPath)) File.Delete(markerPath);
+            }
+            catch { /* best-effort cleanup */ }
         }
-        catch { /* best-effort cleanup */ }
     }
 
     public async Task RunAsync(CancellationToken externalToken = default)
@@ -413,12 +436,15 @@ internal class WatchServer : IDisposable
         //    also works when the process exits via SIGTERM signal path.
         if (!OperatingSystem.IsWindows())
         {
-            try
+            foreach (var pipeName in GetWatchPipeCandidates(_filePath))
             {
-                var sockPath = Path.Combine(Path.GetTempPath(), "CoreFxPipe_" + _pipeName);
-                if (File.Exists(sockPath)) File.Delete(sockPath);
+                try
+                {
+                    var sockPath = Path.Combine(Path.GetTempPath(), "CoreFxPipe_" + pipeName);
+                    if (File.Exists(sockPath)) File.Delete(sockPath);
+                }
+                catch { /* best-effort cleanup */ }
             }
-            catch { /* best-effort cleanup */ }
         }
 
         // Small yield so any synchronous continuations scheduled on the

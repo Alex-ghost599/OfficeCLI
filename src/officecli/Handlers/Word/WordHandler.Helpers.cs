@@ -112,6 +112,38 @@ public partial class WordHandler
         return $"{cm:0.##}cm";
     }
 
+    private static void AddFormatAlias(DocumentNode node, string canonicalKey, string aliasKey)
+    {
+        if (node.Format.TryGetValue(canonicalKey, out var value) && !node.Format.ContainsKey(aliasKey))
+            node.Format[aliasKey] = value;
+    }
+
+    private static void AddWordParagraphLegacyAliases(DocumentNode node)
+    {
+        AddFormatAlias(node, "alignment", "align");
+        AddFormatAlias(node, "firstLineIndent", "firstlineindent");
+        AddFormatAlias(node, "indent", "leftindent");
+        AddFormatAlias(node, "leftIndent", "leftindent");
+        AddFormatAlias(node, "rightIndent", "rightindent");
+        AddFormatAlias(node, "hangingIndent", "hangingindent");
+        AddFormatAlias(node, "numId", "numid");
+        AddFormatAlias(node, "numLevel", "numlevel");
+        AddFormatAlias(node, "keepNext", "keepnext");
+        AddFormatAlias(node, "keepLines", "keeplines");
+        AddFormatAlias(node, "pageBreakBefore", "pagebreakbefore");
+        AddFormatAlias(node, "widowControl", "widowcontrol");
+        AddFormatAlias(node, "shading.fill", "shd");
+        AddFormatAlias(node, "fill", "shd");
+    }
+
+    private static void AddWordSectionLegacyAliases(DocumentNode node)
+    {
+        AddFormatAlias(node, "marginTop", "margintop");
+        AddFormatAlias(node, "marginBottom", "marginbottom");
+        AddFormatAlias(node, "marginLeft", "marginleft");
+        AddFormatAlias(node, "marginRight", "marginright");
+    }
+
     private static bool IsTruthy(string? value) =>
         ParseHelpers.IsTruthy(value);
 

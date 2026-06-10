@@ -11,6 +11,19 @@ internal static partial class ChartHelper
 {
     // ==================== Build ChartSpace ====================
 
+    internal static C.ChartSpace BuildPlaceholderChartSpace()
+    {
+        return BuildChartSpace(
+            "column",
+            null,
+            ["Placeholder"],
+            new List<(string name, double[] values)>
+            {
+                ("Series 1", [0d])
+            },
+            new Dictionary<string, string>());
+    }
+
     internal static C.ChartSpace BuildChartSpace(
         string chartType,
         string? title,

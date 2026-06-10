@@ -505,6 +505,8 @@ public partial class PowerPointHandler
                     }
                 }
 
+                string? customGeometryValue = null;
+
                 // Position and size (in EMU, 1cm = 360000 EMU; or parse as cm/in)
                 {
                     long xEmu = 0, yEmu = 0;
@@ -573,9 +575,13 @@ public partial class PowerPointHandler
                     }
                     else
                     {
-                        var presetName = properties.TryGetValue("preset", out var pn) ? pn
+                        var requestedGeometry = properties.TryGetValue("preset", out var pn) ? pn
                             : properties.TryGetValue("geometry", out pn) ? pn
                             : properties.GetValueOrDefault("shape", "rect");
+                        customGeometryValue = LooksLikeCustomGeometryPath(requestedGeometry)
+                            ? requestedGeometry
+                            : null;
+                        var presetName = customGeometryValue != null ? "rect" : requestedGeometry;
                         // "custom" is a Get-side marker for "this was custGeom but we
                         // couldn't round-trip the path" — degrade to rect rather than
                         // erroring out (we'd lose the shape entirely otherwise).
@@ -844,6 +850,8 @@ public partial class PowerPointHandler
                     if (properties.TryGetValue(ek, out var ev))
                         effectProps[ek] = ev;
                 }
+                if (customGeometryValue != null)
+                    effectProps["geometry"] = customGeometryValue;
                 if (effectProps.Count > 0)
                     SetRunOrShapeProperties(effectProps, GetAllRuns(newShape), newShape, ownerPart);
 
