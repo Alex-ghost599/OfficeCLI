@@ -244,28 +244,28 @@ Full equation schema: `officecli help docx equation`.
 
 ## Figures, tables, and cross-references (SEQ + PAGEREF)
 
-Two primitives, both **native fieldTypes** (verified against `officecli help docx field` v1.0.63): `seq` for auto-numbered caption counters, `pageref` for "see Fig. 2 on page 7" back-references. Native fields insert correctly, but their **cached rendered values** need a one-shot raw-set patch per field (see §SEQ cached-value trap below) — otherwise downstream viewers that don't recompute cached fields will show every figure as "Fig. 1".
+Two primitives, both **native fieldTypes** (verified against `officecli help docx field` on 1.0.109): `seq` for auto-numbered caption counters, `pageref` for "see Fig. 2 on page 7" back-references. Native fields insert correctly, but their **cached rendered values** need a one-shot raw-set patch per field (see §SEQ cached-value trap below) — otherwise downstream viewers that don't recompute cached fields will show unevaluated fields.
 
 ### SEQ auto-numbering — figures and tables
 
 A SEQ field is a counter with a name (`identifier`). Every `SEQ Figure` increments the Figure counter on **recalc**; every `SEQ Table` increments the Table counter.
 
-**⚠️ SEQ cached-value trap (verified on v1.0.63).** The CLI emits every SEQ field with cached result `1` — so a document with 3 Figure captions readbacks as `Figure 1 / Figure 1 / Figure 1` via `view text` or `query field[fieldType=seq]`, and any downstream viewer that doesn't recompute cached fields will display the same `Figure 1 / Figure 1 / Figure 1`. Word and WPS recompute on open when `w:updateFields=true` is set in settings. **Two must-do steps per paper with multiple figures/tables:**
+**SEQ cached-value trap (retested on 1.0.109).** The CLI emits SEQ fields with an empty cached result; `query field` reports `evaluated=false`, and `view text` prints `#OCLI_NOTEVAL!{SEQ Figure}`. Word and WPS recompute on open when `w:updateFields=true` is set in settings, but non-recalculating viewers will still show the unevaluated sentinel or a blank. **Two must-do steps per paper with multiple figures/tables:**
 
 1. Flip `updateFields=true` in settings once per document (right after `create`). **Position matters** — OOXML `CT_Settings` schema rejects `<w:updateFields>` as the first child; insert it *before* `<w:compat>`:
    ```bash
    officecli raw-set "$FILE" /settings --xpath '//w:compat' --action insertbefore \
      --xml '<w:updateFields xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:val="true"/>'
    ```
-2. **Patch the cached `<w:t>` after each SEQ field** so the artifact reads correctly in every viewer:
+2. **Patch the cached `<w:t>` result run after each SEQ field** so the artifact reads correctly in every viewer:
    ```bash
-   # After adding the Nth SEQ Figure caption, override cached "1" to the real number N:
+   # After adding the Nth SEQ Figure caption, fill/replace the cached result with the real number N:
    officecli raw-set "$FILE" /document \
      --xpath "(//w:p[.//w:instrText[contains(text(),'SEQ Figure')]])[N]//w:fldChar[@w:fldCharType='separate']/following::w:t[1]" \
      --action replace \
      --xml '<w:t xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xml:space="preserve">N</w:t>'
    ```
-   Repeat for N = 1, 2, 3, ... for every figure; same pattern with `SEQ Table` for tables. After patching, `officecli view "$FILE" text` will show `Figure 1 / Figure 2 / Figure 3` — and downstream viewers will too.
+   Repeat for N = 1, 2, 3, ... for every figure; same pattern with `SEQ Table` for tables. After patching, `officecli view "$FILE" text` should show `Figure 1 / Figure 2 / Figure 3` without `#OCLI_NOTEVAL!`.
 
 ```bash
 # Figure with caption BELOW the image. Caption = "Figure <seq>: title" + optional bookmark for cross-ref.
@@ -366,7 +366,7 @@ officecli add "$FILE" /body --type paragraph --prop text="Abstract" --prop align
 officecli add "$FILE" /body --type paragraph --prop text="We present an attention-based model for detecting anomalies in industrial sensor time series..." --prop size=10pt --prop lineSpacing=1.15x --prop spaceAfter=12pt
 
 # 3. Section break + two-column from here on
-#    CRITICAL: `/section[last()]` is REJECTED on v1.0.63 (cast-error). Count sections first, use explicit /section[N].
+#    CRITICAL: `/section[last()]` is rejected on 1.0.109 (`Path not found`). Count sections first, use explicit /section[N].
 officecli add "$FILE" /body --type section --prop type=continuous
 SECTION_COUNT=$(officecli query "$FILE" section --json | jq '.data.results | length')
 # After the add, SECTION_COUNT should be 2 — [1] is pre-break, [2] is post-break (2-col body area).
@@ -408,7 +408,7 @@ officecli add "$FILE" "/body/p[last()]" --type run --prop text="2" --prop supers
 officecli add "$FILE" / --type header --prop type=default --prop align=right --prop size=9pt --prop text="Short Running Title"
 ```
 
-**Nature-family 2-col abstract** is rare — if required, open a `section type=continuous columns=2` BEFORE the abstract heading; short abstracts (<100 words) leave ragged columns. **Mirrored odd/even headers** need `<w:evenAndOddHeaders/>` in settings via `raw-set` — not exposed by high-level API on 1.0.63; deliver without mirroring or inject the flag manually. Full header schema: `officecli help docx header`.
+**Nature-family 2-col abstract** is rare — if required, open a `section type=continuous columns=2` BEFORE the abstract heading; short abstracts (<100 words) leave ragged columns. **Mirrored odd/even headers** are high-level in 1.0.109: `officecli set "$FILE" / --prop evenAndOddHeaders=true` writes `<w:evenAndOddHeaders/>` to settings, though `get /` does not yet surface a readback key. Full header schema: `officecli help docx header`.
 
 ## QA — Delivery Gate (executable)
 
@@ -482,7 +482,7 @@ Academic-specific:
 - **`\mathcal{L}` emits invalid OMML.** Use `\mathit{L}` or plain uppercase. `\mathbf`, `\mathit`, `\mathbb` work; `\mathcal` does not.
 - **`move` on `/body/oMathPara[N]` not reliable.** Do not rely on `move` to reposition display equations. Workaround: `add` at the target position, `remove` the original.
 - **Section break +1 paragraph offset.** Each `add /body --type section` inserts one empty paragraph into `/body`. All `p[N]` indices after the break shift by +1. Plan breaks; after any `add section`, `officecli get "$FILE" /body --depth 1` to re-index.
-- **`/section[last()]` is REJECTED on v1.0.63** (cast-error, same family as pptx's `/slide[last()]`). Always resolve to an explicit `/section[N]`:
+- **`/section[last()]` is rejected on 1.0.109** (`Path not found`). Always resolve to an explicit `/section[N]`:
   ```bash
   SECTION_COUNT=$(officecli query "$FILE" section --json | jq '.data.results | length')
   # then use /section[2], /section[3], ..., NEVER /section[last()]

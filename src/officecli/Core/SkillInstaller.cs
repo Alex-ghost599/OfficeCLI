@@ -26,6 +26,7 @@ internal static class SkillInstaller
         (["claude", "claude-code"],       "Claude Code",    ".claude",              Path.Combine(".claude", "skills")),
         (["copilot", "github-copilot"],   "GitHub Copilot", ".copilot",             Path.Combine(".copilot", "skills")),
         (["codex", "openai-codex"],       "Codex CLI",      ".agents",              Path.Combine(".agents", "skills")),
+        (["codex-desktop", "codex-app"],  "Codex Desktop",  ".codex",               Path.Combine(".codex", "skills")),
         (["cursor"],                      "Cursor",         ".cursor",              Path.Combine(".cursor", "skills")),
         (["windsurf"],                    "Windsurf",       ".windsurf",            Path.Combine(".windsurf", "skills")),
         (["minimax", "minimax-cli"],      "MiniMax CLI",    ".minimax",             Path.Combine(".minimax", "skills")),
@@ -41,6 +42,7 @@ internal static class SkillInstaller
     {
         ["pptx"]            = "officecli-pptx",
         ["word"]            = "officecli-docx",
+        ["word-form"]       = "officecli-word-form",
         ["excel"]           = "officecli-xlsx",
         ["morph-ppt"]       = "morph-ppt",
         ["morph-ppt-3d"]    = "morph-ppt-3d",
@@ -175,7 +177,7 @@ internal static class SkillInstaller
         var content = LoadEmbeddedResource($"skills/{folder}/SKILL.md");
         if (content == null)
             throw new ArgumentException($"Embedded SKILL.md not found for '{skillName}'");
-        return StripSetupSection(content);
+        return RemoveInstallNoise(content);
     }
 
     /// <summary>
@@ -204,6 +206,48 @@ internal static class SkillInstaller
             if (!inSetup) sb.Append(line).Append('\n');
         }
         // Split+rejoin may introduce a trailing newline; preserve original behavior.
+        var result = sb.ToString();
+        if (!content.EndsWith("\n", StringComparison.Ordinal) && result.EndsWith("\n", StringComparison.Ordinal))
+            result = result[..^1];
+        return result;
+    }
+
+    private static string RemoveInstallNoise(string content)
+    {
+        content = StripSetupSection(content);
+        content = ReplaceTopLevelSection(content, "## BEFORE YOU START (CRITICAL)", LocalCheckSection());
+        return content;
+    }
+
+    private static string ReplaceTopLevelSection(string content, string heading, string replacement)
+    {
+        var lines = content.Split('\n');
+        var sb = new StringBuilder(content.Length + replacement.Length);
+        var inTargetSection = false;
+        var replaced = false;
+
+        foreach (var line in lines)
+        {
+            if (!replaced && !inTargetSection && line.StartsWith(heading, StringComparison.Ordinal))
+            {
+                sb.Append(replacement);
+                if (!replacement.EndsWith("\n", StringComparison.Ordinal))
+                    sb.Append('\n');
+                inTargetSection = true;
+                replaced = true;
+                continue;
+            }
+
+            if (inTargetSection && line.StartsWith("## ", StringComparison.Ordinal))
+                inTargetSection = false;
+
+            if (!inTargetSection)
+                sb.Append(line).Append('\n');
+        }
+
+        if (!replaced)
+            return content;
+
         var result = sb.ToString();
         if (!content.EndsWith("\n", StringComparison.Ordinal) && result.EndsWith("\n", StringComparison.Ordinal))
             result = result[..^1];
@@ -324,7 +368,7 @@ internal static class SkillInstaller
 
     private static void InstallBaseFile(string displayName, string targetPath)
     {
-        var content = LoadEmbeddedResource(UmbrellaResource);
+        var content = BuildInstalledUmbrellaContent(LoadEmbeddedResource(UmbrellaResource));
         if (content == null)
         {
             Console.Error.WriteLine($"  {displayName}: embedded resource not found");
@@ -341,6 +385,34 @@ internal static class SkillInstaller
         File.WriteAllText(targetPath, content);
         Console.WriteLine($"  {displayName}: officecli installed ({targetPath})");
     }
+
+    private static string? BuildInstalledUmbrellaContent(string? content)
+    {
+        if (content == null) return null;
+
+        return ReplaceTopLevelSection(content, "## Install", LocalCheckSection());
+    }
+
+    private static string LocalCheckSection() => """
+## Local Check
+
+Before using officecli from an installed local agent skill, run a read-only check:
+
+```bash
+if ! command -v officecli >/dev/null 2>&1; then
+  echo "officecli is not installed or not in PATH"
+  echo "Do not run the official installer automatically."
+else
+  OFFICECLI_PATH=$(command -v officecli)
+  echo "officecli path: $OFFICECLI_PATH"
+  officecli --version
+fi
+```
+
+Do not run the official installer automatically from an agent session; it can replace a source-built or locally pinned binary. For local upgrades, inspect the working tree that owns `officecli`, run that project's documented install command, then verify `officecli --version`, `officecli --help`, and a small `create`/`validate` smoke.
+
+---
+""";
 
     // ─── Specific skill installation ───────────────────────────
 
@@ -397,7 +469,7 @@ internal static class SkillInstaller
             var targetPath = Path.Combine(targetDir, fileName);
             // Only rewrite markdown files, leave scripts/other files as-is
             var rewritten = fileName.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
-                ? RewriteFileReferences(content, fileName)
+                ? RewriteFileReferences(RemoveInstallNoise(content), fileName)
                 : content;
 
             if (File.Exists(targetPath) && File.ReadAllText(targetPath) == rewritten)
@@ -451,7 +523,7 @@ internal static class SkillInstaller
                 var basePath = Path.Combine(skillsDir, UmbrellaFolder, "SKILL.md");
                 if (File.Exists(basePath))
                 {
-                    var content = LoadEmbeddedResource(UmbrellaResource);
+                    var content = BuildInstalledUmbrellaContent(LoadEmbeddedResource(UmbrellaResource));
                     if (content != null && File.ReadAllText(basePath) != content)
                     {
                         File.WriteAllText(basePath, content);
@@ -501,7 +573,7 @@ internal static class SkillInstaller
         {
             var targetPath = Path.Combine(targetDir, fileName);
             var rewritten = fileName.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
-                ? RewriteFileReferences(content, fileName)
+                ? RewriteFileReferences(RemoveInstallNoise(content), fileName)
                 : content;
 
             if (File.Exists(targetPath) && File.ReadAllText(targetPath) == rewritten)

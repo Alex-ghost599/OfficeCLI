@@ -20,7 +20,7 @@ Verify with `officecli --version` (open a new terminal if PATH hasn't picked up)
 
 ## Help-First Rule
 
-This skill teaches what a financial model requires, not every CLI flag. When a prop name / alias / enum is uncertain, consult help BEFORE guessing: `officecli help xlsx [element] [--json]`. Help is pinned to installed version — when this skill and help disagree, **help wins**. Every `--prop X=` below was verified against `officecli help xlsx <element>` on v1.0.63.
+This skill teaches what a financial model requires, not every CLI flag. When a prop name / alias / enum is uncertain, consult help BEFORE guessing: `officecli help xlsx [element] [--json]`. Help is pinned to installed version — when this skill and help disagree, **help wins**. Formula/cache caveats below were rechecked against local OfficeCLI 1.0.109.
 
 ## Mental Model & Inheritance
 
@@ -62,7 +62,7 @@ Every model in this skill builds on three zones. **Name them, tab-color them, an
 **Executable zone audit** (run before Gate 4):
 
 ```bash
-# Calc zone: zero numeric hardcodes allowed. NOTE: `:not(:has(formula))` pseudo doesn't filter on v1.0.63+ — filter via jq on .format.formula == null.
+# Calc zone: zero numeric hardcodes allowed. NOTE: `:not(:has(formula))` still does not filter out formula cells on 1.0.109 — filter via jq on .format.formula == null.
 HARDCODE=$(officecli query "$FILE" 'cell[type=Number]' --json | jq '[.data.results[] | select(.format.formula == null) | select(.path | test("/(P&L|Balance Sheet|Cash Flow|DCF|Debt|ARR)/"))] | length')
 [ "$HARDCODE" -eq 0 ] && echo "Zone audit OK" || { echo "REJECT: $HARDCODE hardcoded numeric cells on Calc sheets — move to Assumptions"; exit 1; }
 # Assumptions zone: should be non-zero.
@@ -233,7 +233,7 @@ cat <<'EOF' | officecli batch "$FILE"
 EOF
 ```
 
-**Why `SUMPRODUCT` not `NPV`.** `NPV(rate, cross_sheet_range)` silently caches `0` on v1.0.63 — ships a wrong valuation to any non-recalculating reader. `SUMPRODUCT(values/(1+rate)^periods)` is algebraically equivalent and caches correctly (period row `FCF!B2:K2 = 1..10` is a one-time setup). For irregular dates (`XNPV`), use `SUMPRODUCT(values/(1+rate)^((dates-base_date)/365))`. See §Known Issues.
+**Why `SUMPRODUCT` here.** `NPV(rate, cross_sheet_range)` now cached correctly in the 1.0.109 smoke case, but explicit `SUMPRODUCT(values/(1+rate)^periods)` remains easier to audit and also covers irregular-date `XNPV` replacements. `XNPV(...)` still read back with `cachedValue=null` in 1.0.109; for board-delivered XLSX that may be opened by non-recalculating viewers, use `SUMPRODUCT(values/(1+rate)^((dates-base_date)/365))`. See §Known Issues.
 
 **Step 5 — 2-axis sensitivity grid (WACC × g).** 5×5 grid. Rows = WACC values `7.5% ... 11.5%`, cols = `g` values `1.5% ... 3.5%`. Each cell = one self-contained formula re-running the DCF with the grid's WACC and g substituted. Template:
 
@@ -353,7 +353,7 @@ officecli add "$FILE" /Returns --type comment --prop ref=B4 --prop text='IRR —
 ```
 
 **Callout — labels: `comment` element vs Notes column vs `formula` (three distinct mechanics).**
-- **Hover tooltip** → `officecli add ... --type comment --prop ref=<cell> --prop text='...'`. The **`comment` key is NOT a valid prop on `set cell`** (not in `officecli help xlsx cell` on v1.0.63) — it silently drops when embedded inside a `set cell` props dict. Use the dedicated element.
+- **Hover tooltip** → `officecli add ... --type comment --prop ref=<cell> --prop text='...'`. The **`comment` key is NOT a valid prop on `set cell`** in 1.0.109; `set` applies valid props, then exits 2 with `UNSUPPORTED props: comment`. Use the dedicated element.
 - **Visible text in an adjacent Notes column** → `{"command":"set","path":"/DCF/D3","props":{"value":"TV = FCF × (1+g) / (WACC−g)"}}` — **`value`, not `formula`**, plain quoted string.
 - **Formula-style prose written as a real formula** → NEVER. `{"formula":"FCF10*(1+g)/(WACC-g)"}` produces `#NAME?` in Excel (`FCF10`, `g`, `WACC` are unbound identifiers in that cell context).
 
@@ -549,7 +549,7 @@ Financial-model-specific:
 - **Iterative calc silent non-convergence.** `calc.iterate=true iterateCount=100` converges at whatever the cap lands on — even if the true answer is 2× that. Always run convergence verify (§Circular references). Complex LBO rings (multi-tranche debt + sweep + tax shield) may not converge; when `cachedValue=0` on a ring cell, use §Write-order surgery.
 - **Batch-while-resident deadlock on circular writes.** Writing the closing leg of a cross-sheet ring via `batch` with a resident open deadlocks at 100% CPU. Even single `set` on a ring cell can hang. Fix: close residents, write the ring in two passes per §Write-order surgery. Non-resident single-heredoc is the only safe form.
 - **Cross-sheet cached value stale in `view html`.** Downstream written in the same sequence as upstream caches `0`. Excel resolves on open; HTML preview does NOT. Re-set every downstream non-resident after the chain (§Build-order & cache-drift).
-- **`NPV()` / `XNPV()` cross-sheet caches `0` on v1.0.63.** Rewrite as `SUMPRODUCT(values/(1+rate)^periods)` — algebraically equivalent, caches correctly. Applied by default in Recipe B Step 4.
+- **`XNPV()` cachedValue remains null on 1.0.109.** `NPV()` cross-sheet cached correctly in the current smoke case, but `XNPV(rate, values, dates)` read back `cachedValue=null`. Rewrite irregular-date discounting as `SUMPRODUCT(values/(1+rate)^((dates-base_date)/365))`. Recipe B uses `SUMPRODUCT` by default because it is explicit and viewer-safe.
 - **Sensitivity-grid cache trap.** Grid built before FCF/WACC → every cell caches `0`. Build FCF + WACC + DCF first, then grid in a separate non-resident batch. Fallback: hardcode blue + comment `"hardcoded sensitivity; refresh on assumption change"`.
 - **`BS.Cash` = CF ending cash always** (including Y1: `BS.Cash = 'Cash Flow'!B19`). Never an independent plug or Assumptions ref — a plugged `BS.Cash` hides balance errors.
 - **Year 2+ `Opening Cash` = prior period `Ending Cash`** (`C17=B19`, `D17=C19`). Independent Y2+ opening-cash inputs silently drift from BS.

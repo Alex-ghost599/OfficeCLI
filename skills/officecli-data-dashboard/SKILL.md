@@ -214,7 +214,7 @@ A card is a label cell + a value cell. The label is small gray (font.size=9, fon
 
 At the `dashboard` preset's default title font, the chart plot-box width (in column units) must stay ahead of the title string, or the title clips mid-word. Rule of thumb: `chart.width ≥ ceil(title.length × 0.18)`. A 35-character title ("Department: Year-End Headcount vs Attrition Rate") needs `width ≥ 7`; be safer and use 10–12. If the anchor cannot be widened, shorten the title to ≤ 25 characters — clipped titles in a board-ready deliverable are indefensible.
 
-`officecli get chart[N]` does not expose numeric `width` on 1.0.63 — it returns `.data.format.anchor` (e.g. `"A6:K21"`). Derive column span from letters (A→K = 10 cols) for Gate 2.
+`officecli get chart[N]` on 1.0.109 exposes `.data.format.anchor`, `width`, `height`, `x`, and `y` (e.g. anchor `"A6:K21"`, width `"480pt"`). Prefer `width`/`height` for direct checks; derive column span from `anchor` only when reviewing older artifacts or when sheet-grid budgeting matters.
 
 ### Print-ready delivery (board-pack / investor-send / one-pager)
 
@@ -399,9 +399,9 @@ Scatter's `series1.xValues` is not exposed in `get --json` (series `values=""`) 
 | D-12 | `import --header` sets freeze + AutoFilter but does NOT set column widths; `numFmt` on a `col[]` path is rejected | Set widths on `col[]`; set `numFmt` on the cell range (`A2:A13`), not the column. |
 | D-13 | Sparkline `highpoint` is a bool (highlight on/off), not a color. `--prop highpoint=FF0000` errors `Invalid boolean value` | `--prop highPoint=true --prop highMarkerColor=FF0000`. Same pattern for lowPoint / firstPoint / lastPoint and their *MarkerColor. |
 | D-14 | Sparkline cross-sectional data is meaningless (a region or department has no ordering) | Skip sparklines unless rows are a sequential time-series (dates, months, quarters). |
-| D-15 | 1.0.63+ rejects empty chart `add` (`Chart requires data`) at the CLI layer — legacy skills that relied on silent accept will fail here | Always provide `series1.values=` / `dataRange=` / inline `data=` at chart `add` time. Treat Gate 2 seriesCount check as a belt-and-braces verification. |
+| D-15 | 1.0.109 rejects empty chart `add` (`Chart requires a 'data' property`) at the CLI layer — legacy skills that relied on silent accept will fail here | Always provide `series1.values=` / `dataRange=` / inline `data=` at chart `add` time. Treat Gate 2 seriesCount check as a belt-and-braces verification. |
 | D-16 | `fullCalcOnLoad=true` guarantees a **runtime** recalc when the end user opens the file; it does NOT refresh the build-time `cachedValue` in XML. Build sequence `set B=100 → set E==B+D → fix B=150` leaves `E.cachedValue` stale (board sees "Net Change = 0"). | After all upstream edits are final, re-issue every downstream formula (`officecli set "$FILE" /Sheet/E2 --prop formula==B2+D2`) OR `close` + re-open the file. Gate 8 verifies. |
-| D-17 | 1.0.63 built-in calc engine does NOT evaluate `SUMPRODUCT` with array-predicate form `SUMPRODUCT((A2:A97=X)*C2:C97*D2:D97)` — cachedValue stays `0`/`null`, Gate 8 rejects. Runtime Excel / WPS compute fine, but board-delivered XLSX with stale cache still ships `0`. | Rewrite as helper column + `SUMIF`: `F2==C2*D2` on source sheet, then `=SUMIF(B:B, "Region X", F:F)`. Or pre-aggregate in Summary sheet and chart from there. |
+| D-17 | 1.0.109 evaluates the simple array-predicate `SUMPRODUCT((range=criterion)*values)` smoke case correctly. Older artifacts may still carry stale caches, and complex predicates should be treated as high-risk until Gate 8 proves cached values. | Prefer helper column + `SUMIF` or pre-aggregated Summary data for board dashboards when the predicate becomes complex; otherwise Gate 8 cache checks decide. |
 
 ### Inherited (pointer only)
 
