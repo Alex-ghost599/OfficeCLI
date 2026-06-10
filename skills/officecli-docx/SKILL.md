@@ -37,7 +37,7 @@ Help is pinned to the installed CLI version. When this skill and help disagree, 
 
 - ALWAYS quote element paths: `"/body/p[1]"`, not `/body/p[1]`.
 - Use **single quotes** for any prop value containing `$`: `--prop text='$50M'`. The rule holds at any length — a 200-word body paragraph containing `$50M` needs the whole value inside single quotes, same as a three-word heading: `--prop text='In Q4 we hit $50M ARR, up 18% YoY — the strongest quarter since inception...'`. Mixing `'... $var ...'` and `"... $50 ..."` on long strings is where shell-leak silently strips `$50` → nothing.
-- NEVER hand-write `\$`, `\t`, `\n` inside executable examples. The CLI does not interpret backslash escapes; they will land in your file as literal characters. In a cell / paragraph text, a real newline goes through the JSON layer (`batch` heredoc with `"\n"` inside the JSON string).
+- Do not hand-write `\$` inside executable examples; the CLI does not interpret it and the literal backslash will land in your file. The two-character escapes `\n` and `\t` in `--prop text=` ARE interpreted as a real newline / tab in 1.0.109; use `\\n` only when you need a literal backslash-n.
 
 **Incremental execution.** Run commands one at a time and read each exit code. `officecli` mutates the file on every call; a 50-command script that fails at command 3 will cascade silently. One command → check output → continue. After any structural op (new style, table, TOC, section break) run `get` on it before stacking more on top.
 
@@ -589,10 +589,10 @@ grep -nE '(shd\.fill|ind\.firstLine|border\.(top|bottom|left|right)[^a-z])' comm
 
 ### Shell escape — three layers to keep separate
 
-The CLI does not interpret `\$`, `\t`, `\n`. They land in your document as literal characters.
+The CLI does not interpret `\$`; it lands in your document as a literal backslash plus dollar. The two-character escapes `\n` and `\t` in `--prop text=` are interpreted as a real newline / tab in 1.0.109.
 
 1. **Shell level.** `$` in a prop value → single-quote the whole value: `--prop text='$50M'`. Unescaped `$50M` gets stripped to `M` by the shell.
-2. **JSON level (batch).** Standard JSON escapes — `"\n"`, `"\t"`, `"\""`. A real newline inside a cell/paragraph goes via `"\n"` in JSON (CLI passes the real `\n` char to Word). Writing `\n` (two characters) in a shell-quoted `--prop text=` is a bug — Word shows `\n` text.
+2. **CLI / JSON level.** In shell props, `--prop text='A\nB'` creates a real newline and `--prop text='A\tB'` creates a tab. In batch JSON, standard escapes (`"\n"`, `"\t"`, `"\""`) also work.
 3. **Word level.** Word's own literal `\n` is not a newline — it is two characters. If you need a soft line break inside a run, use `<w:br/>` via `raw-set`, or split into separate paragraphs.
 
 If in doubt, `view text` after writing and compare character-for-character.

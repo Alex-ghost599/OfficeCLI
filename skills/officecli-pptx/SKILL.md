@@ -318,7 +318,7 @@ officecli add "$FILE" "/slide[2]/shape[@name=Card1]/paragraph[1]" --type run \
   --prop text=" (inline detail)" --prop size=14 --prop italic=true --prop color=8899BB
 ```
 
-For real newlines inside one run, use a batch heredoc with JSON `"\n"`. Shell-quoted `\n` in `--prop text=` is NOT interpreted.
+For real newlines inside one run, shell-quoted `--prop text='A\nB'` and batch JSON `"\n"` both work. Use `\\n` only when the intended text literally contains backslash-n.
 
 ### Charts
 
@@ -583,4 +583,4 @@ Sanity-check cheatsheet — what breaks on the first try. Design + shell traps.
 | `/shape[myname]` (bare name in brackets) | Use `@name=` selector: `/shape[@name=myname]` or `/shape[@id=10007]` |
 | Paths 1-based vs `--index` 0-based | `/slide[1]` = first slide; `--index 0` = first position |
 | `$` in `--prop text=` | Single-quote: `--prop text='$15M'`. Double-quoted `"$15M"` gets shell-expanded to `M` |
-| `\n` / `\t` in `--prop text=` | CLI does NOT interpret. Use multiple `--type paragraph`, or batch heredoc with JSON `"\n"` |
+| `\n` / `\t` in `--prop text=` | CLI interprets the two-character escapes as a paragraph break / tab. Use `\\n` only when you need a literal backslash-n |

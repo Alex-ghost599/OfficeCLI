@@ -34,7 +34,7 @@ Help reflects the installed CLI version. When this skill and help disagree, **he
 - ALWAYS quote element paths: `"/Sheet1/row[1]"`, not `/Sheet1/row[1]`.
 - Use **single quotes** for any prop value containing `$`: `numFmt='$#,##0'`.
 - For formulas with cross-sheet `!` references, use `batch` with a `<<'EOF'` heredoc (see Known Issues).
-- NEVER hand-write `\$`, `\t`, `\n` inside executable examples. The CLI does not interpret backslash escapes; they will land in your file as literal characters.
+- Do not hand-write `\$` inside executable examples; the CLI does not interpret it and the literal backslash will land in your file. The two-character escapes `\n` and `\t` in `--prop value=` ARE interpreted as a real newline / tab in 1.0.109; use `\\n` only when you need a literal backslash-n.
 
 **Incremental execution.** Run commands one at a time and read each exit code. `officecli` mutates the file on every call; a 50-command script that fails at command 3 will cascade silently. One command → check output → continue.
 
@@ -464,10 +464,10 @@ Before calling a color or chart "broken", open the file in the user's actual tar
 
 ### Escape layers (shell quoting is above; these are the extras)
 
-The CLI does not interpret `\$` / `\t` / `\n` — they land as literal characters. Shell-level rules are in L25-30. Two additional layers:
+The CLI does not interpret `\$` — it lands as a literal backslash plus dollar. The two-character escapes `\n` and `\t` in `--prop value=` ARE interpreted as a real newline / tab in 1.0.109. Shell-level rules are in L25-30. Two additional layers:
 
 - **JSON level (batch).** Standard JSON escapes — `"\n"`, `"\t"`, `"\""`. A real backslash in the final string is `"\\\\"`.
-- **Excel level.** `\n` in a cell for line break → write `"\n"` **inside JSON**. In a shell-quoted prop it stays literal (Excel shows `\n` text). When in doubt, `officecli get` the cell and compare character-for-character.
+- **Excel level.** `--prop value='A\nB'` and batch JSON `"A\nB"` both create a line break in a cell. Use `\\n` only when the final cell text should literally contain backslash-n. When in doubt, `officecli get` the cell and compare character-for-character.
 
 ### Other common pitfalls
 

@@ -35,7 +35,7 @@ Verify with `officecli --version`. If still not found after install, open a new 
 
 **When unsure about property names, value formats, or command syntax, ALWAYS run help instead of guessing.** One help query beats guess-fail-retry loops.
 
-`officecli help` ≡ `officecli --help`, and `officecli <cmd> --help` ≡ `officecli help <cmd>` — same content.
+`officecli help` ≡ `officecli --help`. For subcommands, prefer `officecli <cmd> --help`; schema help uses `officecli help <format> ...`.
 
 ```bash
 officecli help                                  # All commands + global options + schema entry points
@@ -167,7 +167,7 @@ Returns DocumentNodes for whatever is currently selected. Empty result if nothin
 
 ```bash
 # User clicks shapes in the browser, then asks "make these red"
-PATHS=$(officecli get deck.pptx selected --json | jq -r '.data.Results[].path')
+PATHS=$(officecli get deck.pptx selected --json | jq -r '.data.results[].path')
 for p in $PATHS; do officecli set deck.pptx "$p" --prop fill=FF0000; done
 ```
 
@@ -181,12 +181,12 @@ for p in $PATHS; do officecli set deck.pptx "$p" --prop fill=FF0000; done
 
 ### Marks — edit proposals waiting for review
 
-Use `mark` when changes need human review BEFORE they hit the file. Marks live in the watch process only; a separate `set` pipeline applies accepted ones. For one-shot changes use `set` directly; for permanent file annotations use `add --type comment` (Word native).
+Use `watch ... mark` when changes need human review BEFORE they hit the file. Marks live in the watch process only; a separate `set` pipeline applies accepted ones. For one-shot changes use `set` directly; for permanent file annotations use `add --type comment` (Word native).
 
 ```bash
-officecli mark <file> <path> [--prop find=... color=... note=... tofix=... regex=true] [--json]
-officecli unmark <file> [--path <p> | --all] [--json]
-officecli get-marks <file> [--json]
+officecli watch <file> mark <file> <path> [--prop find=... color=... note=... tofix=... regex=true] [--json]
+officecli watch <file> unmark <file> [--path <p> | --all] [--json]
+officecli watch <file> marks <file> [--json]
 ```
 
 Props: `find` (literal or regex when `regex=true`; raw form `find='r"[abc]"'`), `color` (hex / `rgb(...)` / 22 named whitelist), `note`, `tofix` (drives apply pipeline). **Path** must be `data-path` format from watch HTML — see subskills for full pipeline.
@@ -332,7 +332,7 @@ echo '[
 ]' | officecli batch data.xlsx --json
 
 officecli batch data.xlsx --commands '[{"op":"set","path":"/Sheet1/A1","props":{"value":"Done"}}]' --json
-officecli batch data.xlsx --input updates.json --force --json
+officecli batch data.xlsx --input updates.json --json
 ```
 
 Supports: `add`, `set`, `get`, `query`, `remove`, `move`, `swap`, `view`, `raw`, `raw-set`, `validate`. Fields: `command` (or `op`), `path`, `parent`, `type`, `from`, `to`, `index`, `after`, `before`, `props`, `selector`, `mode`, `depth`, `part`, `xpath`, `action`, `xml`.
