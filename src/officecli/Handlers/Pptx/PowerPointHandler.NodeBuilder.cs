@@ -2662,7 +2662,7 @@ public partial class PowerPointHandler
         }
         else
         {
-            var lines = text.Split('\n');
+            var lines = SplitPptTextLines(text);
             foreach (var line in lines)
             {
                 var para = new Drawing.Paragraph();

@@ -37,6 +37,16 @@ public partial class PowerPointHandler
         return t;
     }
 
+    private static string[] SplitPptTextLines(string text)
+    {
+        var normalized = (text ?? string.Empty)
+            .Replace("\\r\\n", "\n", StringComparison.Ordinal)
+            .Replace("\\n", "\n", StringComparison.Ordinal)
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n');
+        return normalized.Split('\n');
+    }
+
     /// <summary>
     /// Read a table cell's text content, joining multi-paragraph text with "\n".
     /// CONSISTENCY(cell-text-readback): cell.TextBody?.InnerText concatenates
