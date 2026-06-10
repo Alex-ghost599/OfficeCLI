@@ -38,6 +38,13 @@ internal sealed class CliSubprocessHarness : IDisposable
         return path;
     }
 
+    public string CopyFixture(string sourcePath)
+    {
+        var path = CreateTempFile(Path.GetExtension(sourcePath));
+        File.Copy(sourcePath, path, overwrite: true);
+        return path;
+    }
+
     public async Task<CliCommandResult> RunAsync(TimeSpan timeout, params string[] args)
     {
         var startInfo = new ProcessStartInfo
@@ -55,6 +62,7 @@ internal sealed class CliSubprocessHarness : IDisposable
         startInfo.Environment["HOME"] = _homeDir;
         startInfo.Environment["TMPDIR"] = _tmpDir;
         startInfo.Environment["OFFICECLI_SKIP_UPDATE"] = "1";
+        startInfo.Environment["OFFICECLI_NO_AUTO_INSTALL"] = "1";
 
         return await RunProcessAsync(startInfo, timeout);
     }
@@ -75,6 +83,7 @@ internal sealed class CliSubprocessHarness : IDisposable
         startInfo.Environment["HOME"] = _homeDir;
         startInfo.Environment["TMPDIR"] = _tmpDir;
         startInfo.Environment["OFFICECLI_SKIP_UPDATE"] = "1";
+        startInfo.Environment["OFFICECLI_NO_AUTO_INSTALL"] = "1";
 
         return await RunProcessAsync(startInfo, timeout);
     }
@@ -96,6 +105,7 @@ internal sealed class CliSubprocessHarness : IDisposable
         startInfo.Environment["HOME"] = _homeDir;
         startInfo.Environment["TMPDIR"] = _tmpDir;
         startInfo.Environment["OFFICECLI_SKIP_UPDATE"] = "1";
+        startInfo.Environment["OFFICECLI_NO_AUTO_INSTALL"] = "1";
 
         var background = CliBackgroundProcess.Start(startInfo);
         _backgroundProcesses.Add(background);
@@ -154,13 +164,12 @@ internal sealed class CliSubprocessHarness : IDisposable
         var candidates = new[]
         {
             Path.Combine(repoRoot, "src", "officecli", "bin", configuration, "net10.0", "osx-arm64", "officecli"),
-            Path.Combine(repoRoot, "src", "officecli", "bin", configuration, "net10.0", "officecli"),
-            Path.Combine(repoRoot, "src", "officecli", "bin", "Release", "net10.0", "osx-arm64", "officecli"),
-            Path.Combine(repoRoot, "src", "officecli", "bin", "Release", "net10.0", "officecli")
+            Path.Combine(repoRoot, "src", "officecli", "bin", configuration, "net10.0", "officecli")
         };
 
         var path = candidates.FirstOrDefault(File.Exists);
-        path.Should().NotBeNull("CLI subprocess tests require a Release build of officecli before execution");
+        path.Should().NotBeNull(
+            $"CLI subprocess tests require a {configuration} officecli apphost, or OFFICECLI_TEST_CLI must point to one");
         return path!;
     }
 
