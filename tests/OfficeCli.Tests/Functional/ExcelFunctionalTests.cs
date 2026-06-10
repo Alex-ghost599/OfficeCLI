@@ -407,19 +407,19 @@ public class ExcelFunctionalTests : IDisposable
         // 3. Get + Verify
         var row = _handler.Get("/Sheet1/row[1]");
         row.Type.Should().Be("row");
-        ((double)row.Format["height"]).Should().Be(30);
+        row.Format["height"].Should().Be("30pt");
 
         // 4. Set (modify)
         _handler.Set("/Sheet1/row[1]", new() { ["height"] = "40" });
 
         // 5. Get + Verify
         row = _handler.Get("/Sheet1/row[1]");
-        ((double)row.Format["height"]).Should().Be(40);
+        row.Format["height"].Should().Be("40pt");
 
         // 6. Persistence
         Reopen();
         row = _handler.Get("/Sheet1/row[1]");
-        ((double)row.Format["height"]).Should().Be(40);
+        row.Format["height"].Should().Be("40pt");
     }
 
     // ==================== Freeze Panes Lifecycle ====================
