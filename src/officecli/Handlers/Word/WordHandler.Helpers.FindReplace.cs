@@ -580,7 +580,7 @@ public partial class WordHandler
 
     /// <summary>
     /// Resolve paragraphs for a find operation based on path.
-    /// "/" or "/body" → body paragraphs; "/header[N]" → header N; "/footer[N]" → footer N;
+    /// "/" → document text parts; "/body" → body paragraphs; "/header[N]" → header N; "/footer[N]" → footer N;
     /// "/paragraph[N]" → specific paragraph; selector → query results.
     ///
     /// BUG-TESTER+FUZZER R33: out-of-bound indices and unrecognized Word
@@ -595,7 +595,14 @@ public partial class WordHandler
         var paragraphs = new List<Paragraph>();
         var mainPart = _doc.MainDocumentPart;
 
-        if (path is "/" or "" or "/body")
+        if (path is "/body")
+        {
+            if (mainPart?.Document?.Body != null)
+                paragraphs.AddRange(mainPart.Document.Body.Descendants<Paragraph>());
+            return paragraphs;
+        }
+
+        if (path is "/" or "")
         {
             // R21-1: root find/replace must sweep EVERY part that holds
             // paragraphs, not just the body — header/footer/footnote/endnote/

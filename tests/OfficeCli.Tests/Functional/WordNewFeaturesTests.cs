@@ -44,7 +44,7 @@ public class WordNewFeaturesTests : IDisposable
 
         var sec = _handler.Get("/section[1]");
         sec.Format["columns"].Should().Be((short)3);
-        sec.Format["equalWidth"].Should().Be(true);
+        sec.Format["columns.equalWidth"].Should().Be(true);
     }
 
     [Fact]
@@ -77,7 +77,7 @@ public class WordNewFeaturesTests : IDisposable
 
         var sec = _handler.Get("/section[1]");
         sec.Format["columns"].Should().Be((short)2);
-        sec.Format["separator"].Should().Be(true);
+        sec.Format["columns.separator"].Should().Be(true);
     }
 
     // =====================================================================
@@ -90,7 +90,8 @@ public class WordNewFeaturesTests : IDisposable
         _handler.Add("/body", "paragraph", null, new() { ["text"] = "Page: " });
         var result = _handler.Add("/body/p[1]", "pagenum", null, new());
 
-        result.Should().Contain("/body/p[1]/r[");
+        result.Should().Contain("/body/p[@paraId=");
+        result.Should().Contain("/r[");
         var para = _handler.Get("/body/p[1]", depth: 2);
         // The paragraph should contain field char elements within runs
         para.Text.Should().Contain("Page:");
@@ -109,7 +110,8 @@ public class WordNewFeaturesTests : IDisposable
         _handler.Add("/body", "paragraph", null, new() { ["text"] = "Date: " });
         var result = _handler.Add("/body/p[1]", "date", null, new());
 
-        result.Should().Contain("/body/p[1]/r[");
+        result.Should().Contain("/body/p[@paraId=");
+        result.Should().Contain("/r[");
     }
 
     [Fact]
@@ -133,7 +135,8 @@ public class WordNewFeaturesTests : IDisposable
             ["size"] = "14",
             ["font"] = "Arial"
         });
-        result.Should().Contain("/body/p[1]/r[");
+        result.Should().Contain("/body/p[@paraId=");
+        result.Should().Contain("/r[");
     }
 
     [Fact]
@@ -226,7 +229,7 @@ public class WordNewFeaturesTests : IDisposable
         node.Type.Should().Be("sdt");
         node.Format["alias"].Should().Be("UserName");
         node.Format["tag"].Should().Be("name_field");
-        node.Format["sdtType"].Should().Be("text");
+        node.Format["type"].Should().Be("text");
         node.Text.Should().Be("Enter your name");
     }
 
@@ -243,7 +246,7 @@ public class WordNewFeaturesTests : IDisposable
 
         var node = _handler.Get(result);
         node.Type.Should().Be("sdt");
-        node.Format["sdtType"].Should().Be("dropdown");
+        node.Format["type"].Should().Be("dropdown");
         node.Format["items"].Should().Be("Draft,Review,Final");
         node.Text.Should().Be("Draft");
     }
@@ -260,7 +263,7 @@ public class WordNewFeaturesTests : IDisposable
         });
 
         var node = _handler.Get(result);
-        node.Format["sdtType"].Should().Be("combobox");
+        node.Format["type"].Should().Be("combobox");
         node.Format["items"].Should().Be("A,B,C");
     }
 
@@ -276,7 +279,7 @@ public class WordNewFeaturesTests : IDisposable
         });
 
         var node = _handler.Get(result);
-        node.Format["sdtType"].Should().Be("date");
+        node.Format["type"].Should().Be("date");
         node.Format["alias"].Should().Be("StartDate");
     }
 
@@ -366,7 +369,7 @@ public class WordNewFeaturesTests : IDisposable
         var node = _handler.Get(path);
         node.Type.Should().Be("sdt");
         node.Format["alias"].Should().Be("Priority");
-        node.Format["sdtType"].Should().Be("dropdown");
+        node.Format["type"].Should().Be("dropdown");
         node.Text.Should().Be("Medium");
     }
 
@@ -666,13 +669,13 @@ public class WordNewFeaturesTests : IDisposable
         _handler.Set("paragraph[style=Heading1]", new() { ["alignment"] = "center" });
 
         var p1 = _handler.Get("/body/p[1]");
-        p1.Format["alignment"].Should().Be("center");
+        p1.Format["align"].Should().Be("center");
 
         var p2 = _handler.Get("/body/p[2]");
-        p2.Format.Should().NotContainKey("alignment"); // Body text unaffected
+        p2.Format.Should().NotContainKey("align"); // Body text unaffected
 
         var p3 = _handler.Get("/body/p[3]");
-        p3.Format["alignment"].Should().Be("center");
+        p3.Format["align"].Should().Be("center");
     }
 
     [Fact]

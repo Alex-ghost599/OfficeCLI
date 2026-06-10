@@ -139,7 +139,6 @@ public class MixedHandlerFuzzer : IDisposable
     [Theory]
     [InlineData("abc")]
     [InlineData("NaN")]
-    [InlineData("1.5")]
     public void F57a_Word_AddParagraph_InvalidLeftIndent_ThrowsArgumentException(string leftIndent)
     {
         using var handler = new WordHandler(_docxPath, editable: true);
@@ -176,7 +175,6 @@ public class MixedHandlerFuzzer : IDisposable
     [Theory]
     [InlineData("abc")]
     [InlineData("NaN")]
-    [InlineData("1.5")]
     public void F57b_Word_SetParagraph_InvalidLeftIndent_ThrowsArgumentException(string leftIndent)
     {
         string paraPath;

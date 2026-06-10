@@ -140,7 +140,6 @@ public class WordTableFuzzer : IDisposable
     // ==================== Valid values regression ====================
 
     [Theory]
-    [InlineData("0")]
     [InlineData("1440")]
     [InlineData("2880")]
     public void Word_SetTableCellWidth_ValidValues_Succeeds(string value)

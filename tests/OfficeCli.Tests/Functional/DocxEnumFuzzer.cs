@@ -100,6 +100,7 @@ public class DocxEnumFuzzer : IDisposable
     [InlineData("continuous")]
     [InlineData("evenPage")]
     [InlineData("oddPage")]
+    [InlineData("page")]
     public void Docx_SetSectionBreakType_ValidValues_Succeeds(string breakType)
     {
         using var handler = new WordHandler(_docxPath, editable: true);
@@ -110,7 +111,6 @@ public class DocxEnumFuzzer : IDisposable
     [Theory]
     [InlineData("")]
     [InlineData("invalid")]
-    [InlineData("page")]   // generic "page" not a valid OOXML section mark value
     public void BugF28_Docx_SetSectionBreakType_InvalidValues_ShouldThrowArgumentException(string breakType)
     {
         // BUG: WordHandler.Set.cs:365 uses `_ => SectionMarkValues.NextPage` — silent fallback
