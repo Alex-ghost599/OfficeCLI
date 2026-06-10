@@ -1,4 +1,4 @@
-// Copyright 2025 OfficeCli (officecli.ai)
+// Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
 using DocumentFormat.OpenXml.Packaging;
@@ -35,13 +35,31 @@ public partial class WordHandler
             case "docgrid.linepitch":
             {
                 var grid = EnsureDocGridInSection();
-                grid.LinePitch = ParseHelpers.SafeParseInt(value, "docGrid.linePitch");
+                var lp = ParseHelpers.SafeParseInt(value, "docGrid.linePitch");
+                // OOXML ST_DecimalNumber here describes a positive line height
+                // (twips). 0/negative values disable the grid silently — Word
+                // ignores the docGrid in that case, so reject up front rather
+                // than letting a no-op land on disk.
+                if (lp < 1)
+                    throw new ArgumentException(
+                        $"Invalid docGrid.linePitch '{value}': must be a positive integer in twips (>= 1).");
+                grid.LinePitch = lp;
                 return true;
             }
             case "docgrid.charspace" or "docgrid.characterspace":
             {
                 var grid = EnsureDocGridInSection();
-                grid.CharacterSpace = ParseHelpers.SafeParseInt(value, "docGrid.charSpace");
+                var cs = ParseHelpers.SafeParseInt(value, "docGrid.charSpace");
+                // ECMA-376 declares charSpace as ST_DecimalNumber (xsd:integer)
+                // — any signed integer. Real Word documents using CJK grid
+                // commonly write negative values (e.g. -2049 for tight
+                // east-asian spacing). An earlier revision of this code
+                // rejected anything outside [0, 32767], which broke
+                // round-trip on every CJK docx and is documented in
+                // CONSISTENCY(docgrid-charspace-signed). The OOXML SDK
+                // (Int32Value) accepts any int, so we delegate range
+                // checking to Word itself.
+                grid.CharacterSpace = cs;
                 return true;
             }
 
@@ -152,6 +170,10 @@ public partial class WordHandler
             }
             case "evenandoddheaders":
                 SetOnOffSetting<EvenAndOddHeaders>(EnsureSettings(), IsTruthy(value));
+                EnsureSettings().Save();
+                return true;
+            case "autohyphenation":
+                SetOnOffSetting<AutoHyphenation>(EnsureSettings(), IsTruthy(value));
                 EnsureSettings().Save();
                 return true;
             case "defaulttabstop":

@@ -55,15 +55,22 @@ else
 fi
 
 mkdir -p "$INSTALL_DIR"
-cp "$TMPDIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
-chmod +x "$INSTALL_DIR/$BINARY_NAME"
+# Atomic replace: stage as .new alongside the target, sign there, then rename.
+# Overwriting the binary in place would trash the text segment of any
+# running officecli process (macOS does not block ETXTBSY), leaving it
+# stuck in uninterruptible `UE` state on the next code page fault.
+cp "$TMPDIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME.new"
+chmod +x "$INSTALL_DIR/$BINARY_NAME.new"
 rm -rf "$TMPDIR"
 
 # macOS: remove quarantine flag and ad-hoc codesign (required by AppleSystemPolicy)
+# Done on the staged .new copy so the live binary is never mutated in place.
 if [ "$(uname -s)" = "Darwin" ]; then
-    xattr -d com.apple.quarantine "$INSTALL_DIR/$BINARY_NAME" 2>/dev/null || true
-    codesign -s - -f "$INSTALL_DIR/$BINARY_NAME" 2>/dev/null || true
+    xattr -d com.apple.quarantine "$INSTALL_DIR/$BINARY_NAME.new" 2>/dev/null || true
+    codesign -s - -f "$INSTALL_DIR/$BINARY_NAME.new" 2>/dev/null || true
 fi
+
+mv -f "$INSTALL_DIR/$BINARY_NAME.new" "$INSTALL_DIR/$BINARY_NAME"
 
 # Hint if not in PATH
 case ":$PATH:" in
@@ -72,5 +79,5 @@ case ":$PATH:" in
        echo "Or add the line above to your ~/.zshrc or ~/.bashrc" ;;
 esac
 
-echo "OfficeCli installed successfully!"
+echo "OfficeCLI installed successfully!"
 echo "Run 'officecli --help' to get started."

@@ -1,4 +1,4 @@
-// Copyright 2025 OfficeCli (officecli.ai)
+// Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
 using System.Text;
@@ -38,17 +38,32 @@ public partial class PowerPointHandler
 
         DocumentFormat.OpenXml.Drawing.Charts.Chart? chart;
         DocumentFormat.OpenXml.Drawing.Charts.PlotArea? plotArea;
+        ChartSvgRenderer.ChartInfo info;
         try
         {
-            var chartPart = (ChartPart)slidePart.GetPartById(rId);
-            chart = chartPart.ChartSpace?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.Chart>();
-            plotArea = chart?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.PlotArea>();
-            if (plotArea == null) return;
+            var anyPart = slidePart.GetPartById(rId);
+            // cx:chart (extended) path — branch early, extract via ExtractCxChartInfo,
+            // skip the regular c:PlotArea pipeline since cx uses its own layout.
+            if (anyPart is ExtendedChartPart extPart)
+            {
+                var cxChart = extPart.ChartSpace?
+                    .GetFirstChild<DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing.Chart>();
+                if (cxChart == null) return;
+                info = ChartSvgRenderer.ExtractCxChartInfo(cxChart);
+                chart = null;
+                plotArea = null;
+            }
+            else if (anyPart is ChartPart chartPart)
+            {
+                chart = chartPart.ChartSpace?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.Chart>();
+                plotArea = chart?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.PlotArea>();
+                if (plotArea == null) return;
+                info = ChartSvgRenderer.ExtractChartInfo(plotArea, chart);
+            }
+            else return;
         }
         catch { return; }
 
-        // Extract all chart metadata via shared helper
-        var info = ChartSvgRenderer.ExtractChartInfo(plotArea, chart);
         if (info.Series.Count == 0) return;
 
         // Derive text color from theme
@@ -78,8 +93,8 @@ public partial class PowerPointHandler
         var titleH = string.IsNullOrEmpty(info.Title) ? 0 : 20;
         var chartSvgH = svgH - titleH;
 
-        // Manual layout margins
-        var plotAreaLayout = plotArea.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.Layout>();
+        // Manual layout margins — only regular c:chart has a ManualLayout.
+        var plotAreaLayout = plotArea?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.Layout>();
         var manualLayout = plotAreaLayout?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Charts.ManualLayout>();
         int marginTop, marginRight, marginBottom, marginLeft;
         if (manualLayout != null)
@@ -106,13 +121,41 @@ public partial class PowerPointHandler
         if (!string.IsNullOrEmpty(info.Title))
             sb.AppendLine($"      <div style=\"text-align:center;font-size:{info.TitleFontSize};font-weight:bold;padding:4px;flex-shrink:0;color:{chartTextColor}\">{ChartSvgRenderer.HtmlEncode(info.Title)}</div>");
 
+        // Legend position drives the plot+legend layout, mirroring the Word/Excel
+        // paths. right="r" → row, legend after plot; left="l" → row, legend before;
+        // top="t"/"tr" → column, legend before; bottom (default) → below the plot.
+        var legendSide = info.HasLegend && info.LegendPos is "r" or "l";
+        var legendTop  = info.HasLegend && info.LegendPos is "t" or "tr";
+
+        if (legendTop)
+            renderer.RenderLegendHtml(sb, info, chartTextColor);
+
+        if (legendSide)
+        {
+            var flexDir = info.LegendPos == "l" ? "row-reverse" : "row";
+            sb.AppendLine($"      <div style=\"display:flex;flex-direction:{flexDir};align-items:center;gap:8px;flex:1;min-height:0\">");
+        }
+
         sb.AppendLine($"      <svg viewBox=\"0 0 {svgW} {chartSvgH}\" style=\"width:100%;flex:1;min-height:0\" preserveAspectRatio=\"xMidYMin meet\">");
 
         renderer.RenderChartSvgContent(sb, info, svgW, chartSvgH, marginLeft, marginTop, marginRight, marginBottom);
 
         sb.AppendLine("      </svg>");
 
-        renderer.RenderLegendHtml(sb, info, chartTextColor);
+        if (legendSide)
+        {
+            renderer.RenderLegendHtml(sb, info, chartTextColor);
+            sb.AppendLine("      </div>");
+        }
+        else if (!legendTop)
+        {
+            renderer.RenderLegendHtml(sb, info, chartTextColor);
+        }
+
+        // R16a: render the data table grid when dataTable=true, mirroring the
+        // Excel chart path (ExcelHandler.HtmlPreview.Charts.cs). The PPTX path
+        // previously omitted this call, so dataTable=true charts showed no grid.
+        renderer.RenderDataTableHtml(sb, info);
 
         sb.AppendLine("    </div>");
     }

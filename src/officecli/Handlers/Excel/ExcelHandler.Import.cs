@@ -1,4 +1,4 @@
-// Copyright 2025 OfficeCli (officecli.ai)
+// Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
 using System.Globalization;
@@ -42,19 +42,97 @@ public partial class ExcelHandler
 
         int maxCols = 0;
         for (int r = 0; r < rows.Count; r++)
+            if (rows[r].Count > maxCols) maxCols = rows[r].Count;
+
+        // DOS-hardening: reject imports that exceed Excel's sheet dimensions
+        // BEFORE writing anything. Without this an over-sized CSV (e.g. >XFD
+        // columns or >1048576 rows) spun indefinitely instead of erroring.
+        const int ExcelMaxRow = 1048576;
+        const int ExcelMaxCol = 16384; // XFD (ColumnNameToIndex is 1-based)
+        long endRowReq = (long)startRow + rows.Count - 1;
+        if (endRowReq > ExcelMaxRow)
+            throw new ArgumentException(
+                $"Import exceeds Excel's row limit: data would reach row {endRowReq} " +
+                $"(maximum {ExcelMaxRow}). Reduce the CSV or change the start cell.");
+        long endColIdx = (long)startColIdx + maxCols - 1;
+        if (endColIdx > ExcelMaxCol)
+            throw new ArgumentException(
+                $"Import exceeds Excel's column limit: data would reach column {endColIdx} " +
+                $"(maximum {ExcelMaxCol} / XFD). Reduce the CSV width or change the start cell.");
+
+        // BUG-R11-import-dup-row BUG-11: import previously always appended a
+        // brand-new <row r="N">, producing duplicate row entries when the
+        // target rows already existed (Excel auto-repaired by keeping the
+        // first one, silently losing imported data). Upsert by RowIndex —
+        // reuse an existing row, otherwise insert a new one in sorted position.
+        //
+        // PERF(dos-hardening): the previous implementation re-scanned the whole
+        // SheetData (LINQ FirstOrDefault) for every imported row AND every cell,
+        // making a bulk import O(rows*cells * existing) — a 100k-row CSV took
+        // 9+ minutes. Pre-index existing rows once and walk them with an
+        // ascending cursor for sorted insertion; build a per-row cell index
+        // only when reusing a pre-existing row. Bulk-append into a fresh sheet
+        // is now linear.
+        var existingRows = sheetData.Elements<Row>()
+            .Where(rr => rr.RowIndex?.Value != null)
+            .OrderBy(rr => rr.RowIndex!.Value)
+            .ToList();
+        var rowByIndex = new Dictionary<uint, Row>();
+        foreach (var er in existingRows)
+            rowByIndex[er.RowIndex!.Value] = er;
+        int exCursor = 0; // points at the first existing row with index > last processed
+
+        for (int r = 0; r < rows.Count; r++)
         {
             var fields = rows[r];
-            if (fields.Count > maxCols) maxCols = fields.Count;
-            var rowIdx = startRow + r;
+            var rowIdx = (uint)(startRow + r);
+
+            Dictionary<string, Cell>? cellByRef = null;
+            if (rowByIndex.TryGetValue(rowIdx, out var row))
+            {
+                // Reused row may already hold cells — index them once for upsert.
+                cellByRef = new Dictionary<string, Cell>(StringComparer.OrdinalIgnoreCase);
+                foreach (var existingCell in row.Elements<Cell>())
+                    if (existingCell.CellReference?.Value is { } cr)
+                        cellByRef[cr] = existingCell;
+            }
+            else
+            {
+                row = new Row { RowIndex = rowIdx };
+                // Advance the cursor past existing rows that sort before rowIdx,
+                // then insert before the first existing row that sorts after it
+                // (or append when none remain). O(existing) total across all rows.
+                while (exCursor < existingRows.Count
+                       && existingRows[exCursor].RowIndex!.Value < rowIdx)
+                    exCursor++;
+                if (exCursor < existingRows.Count)
+                    sheetData.InsertBefore(row, existingRows[exCursor]);
+                else
+                    sheetData.Append(row);
+            }
 
             for (int c = 0; c < fields.Count; c++)
             {
                 var colIdx = startColIdx + c;
-                var cellRef = $"{IndexToColumnName(colIdx)}{rowIdx}";
-                var cell = FindOrCreateCell(sheetData, cellRef);
+                var cellRef = $"{IndexToColumnName(colIdx)}{rowIdx}".ToUpperInvariant();
+                Cell? cell = null;
+                cellByRef?.TryGetValue(cellRef, out cell);
+                if (cell == null)
+                {
+                    cell = new Cell { CellReference = cellRef };
+                    row.Append(cell);
+                }
+                else
+                {
+                    cell.CellFormula = null;
+                    cell.CellValue = null;
+                    cell.DataType = null;
+                }
                 SetCellValueWithTypeDetection(cell, fields[c]);
             }
         }
+
+        InvalidateRowIndex(sheetData);
 
         // --header: set AutoFilter on data range and freeze pane below first row
         if (hasHeader && rows.Count > 0)
@@ -126,10 +204,15 @@ public partial class ExcelHandler
             return;
         }
 
+        // R13-1: enforce Excel's 32767-char per-cell limit at the CSV/TSV
+        // import path too, so bulk imports fail fast instead of producing a
+        // file Excel refuses to open.
+        EnsureCellValueLength(value, cell.CellReference?.Value);
+
         // Formula: starts with =
         if (value.StartsWith('='))
         {
-            cell.CellFormula = new CellFormula(value[1..]);
+            cell.CellFormula = new CellFormula(OfficeCli.Core.PivotTableHelper.SanitizeXmlText(OfficeCli.Core.ModernFunctionQualifier.Qualify(value[1..])));
             cell.CellValue = null;
             cell.DataType = null;
             return;

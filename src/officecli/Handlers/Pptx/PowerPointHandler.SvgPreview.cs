@@ -1,4 +1,4 @@
-// Copyright 2025 OfficeCli (officecli.ai)
+// Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
 using System.Text;
@@ -6,6 +6,7 @@ using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Presentation;
 using OfficeCli.Core;
+using OfficeCli.Core.TableStyles;
 using Drawing = DocumentFormat.OpenXml.Drawing;
 
 namespace OfficeCli.Handlers;
@@ -29,6 +30,7 @@ public partial class PowerPointHandler
     /// </summary>
     public string ViewAsSvg(int slideNum)
     {
+        using var _cul = InvariantCultureScope.Enter();
         var slideParts = GetSlideParts().ToList();
         if (slideNum < 1 || slideNum > slideParts.Count)
             throw new CliException($"Slide {slideNum} does not exist. This presentation has {slideParts.Count} slide(s).")
@@ -184,7 +186,7 @@ public partial class PowerPointHandler
 
     // ==================== Shape Rendering (SVG) ====================
 
-    private static void RenderShapeSvg(StringBuilder sb, StringBuilder defs, ref int defId,
+    private void RenderShapeSvg(StringBuilder sb, StringBuilder defs, ref int defId,
         Shape shape, OpenXmlPart part, Dictionary<string, string> themeColors,
         (long x, long y, long cx, long cy)? overridePos = null)
     {
@@ -450,23 +452,13 @@ public partial class PowerPointHandler
                 };
             }
 
-            // Counter-flip text so it remains readable when shape is flipped
-            var isFlipH = xfrm?.HorizontalFlip?.Value == true;
-            var isFlipV = xfrm?.VerticalFlip?.Value == true;
-            if (isFlipH || isFlipV)
-            {
-                var sx = isFlipH ? -1 : 1;
-                var sy = isFlipV ? -1 : 1;
-                var tx = isFlipH ? w : 0;
-                var ty = isFlipV ? h : 0;
-                sb.Append($"<g transform=\"translate({tx:0.##},{ty:0.##}) scale({sx},{sy})\">");
-            }
-
+            // PowerPoint mirrors text along with the shape on flipH/flipV. The
+            // shape-level flip transform (lines ~267-271) already applies to the
+            // inner text, so do not counter-flip here. An earlier implementation
+            // counter-flipped to keep text upright; that diverged from real
+            // PowerPoint output (e.g. flipH renders "AI" as "IA").
             RenderTextBodyFO(sb, shape.TextBody, themeColors, w, h,
                 lIns, tIns, rIns, bIns, valign, shape, part);
-
-            if (isFlipH || isFlipV)
-                sb.Append("</g>");
         }
 
         sb.AppendLine("</g>");
@@ -553,7 +545,7 @@ public partial class PowerPointHandler
 
     // ==================== Text Rendering (SVG) ====================
 
-    private static void RenderTextBodySvg(StringBuilder sb, OpenXmlElement textBody,
+    private void RenderTextBodySvg(StringBuilder sb, OpenXmlElement textBody,
         Dictionary<string, string> themeColors,
         double shapeW, double shapeH,
         double lIns, double tIns, double rIns, double bIns,
@@ -673,7 +665,7 @@ public partial class PowerPointHandler
 
             sb.Append($"<text x=\"{textAnchorX:0.##}\" y=\"{baselineY:0.##}\" text-anchor=\"{align}\"");
             sb.Append($" font-size=\"{fontSizePx:0.##}\"");
-            sb.Append($" font-family=\"Calibri, &apos;PingFang SC&apos;, &apos;Microsoft YaHei&apos;, sans-serif\"");
+            sb.Append($" font-family=\"{OfficeDefaultFonts.MinorLatin}, {SvgEncode(ResolveDocCjkFallback())}, sans-serif\"");
             sb.Append(">");
 
             // Bullet character
@@ -1031,7 +1023,7 @@ public partial class PowerPointHandler
 
     // ==================== Table Rendering (SVG) ====================
 
-    private static void RenderTableSvg(StringBuilder sb, StringBuilder defs, ref int defId,
+    private void RenderTableSvg(StringBuilder sb, StringBuilder defs, ref int defId,
         GraphicFrame gf, Dictionary<string, string> themeColors)
     {
         var table = gf.Descendants<Drawing.Table>().FirstOrDefault();
@@ -1046,12 +1038,18 @@ public partial class PowerPointHandler
         double tw = EmuToPx(extents.Cx?.Value ?? 0);
         double th = EmuToPx(extents.Cy?.Value ?? 0);
 
-        // Table style
+        // Table style. Banding flags and grid dimensions feed the per-cell
+        // Core/TableStyles resolver below — mirrors HtmlPreview.Tables.cs.
         var tblPr = table.GetFirstChild<Drawing.TableProperties>();
         var tableStyleId = tblPr?.GetFirstChild<Drawing.TableStyleId>()?.InnerText;
-        var tableStyleName = tableStyleId != null && _tableStyleGuidToName.TryGetValue(tableStyleId, out var sn) ? sn : null;
         bool hasFirstRow = tblPr?.FirstRow?.Value == true;
         bool hasBandRow = tblPr?.BandRow?.Value == true;
+        bool hasLastRow = tblPr?.LastRow?.Value == true;
+        bool hasFirstCol = tblPr?.FirstColumn?.Value == true;
+        bool hasLastCol = tblPr?.LastColumn?.Value == true;
+        bool hasBandCol = tblPr?.BandColumn?.Value == true;
+        var allRowsSvg = table.Elements<Drawing.TableRow>().ToList();
+        int totalRowsSvg = allRowsSvg.Count;
 
         // Column widths
         var gridCols = table.TableGrid?.Elements<Drawing.GridColumn>().ToList();
@@ -1090,11 +1088,25 @@ public partial class PowerPointHandler
                 {
                     ParseSvgColor(cellFill, out cellFillColor, out cellFillOpacity);
                 }
-                else if (tableStyleName != null)
+                else
                 {
-                    var (bg, fg) = GetTableStyleColors(tableStyleName, isHeaderRow, isBandedOdd, themeColors);
-                    if (bg != null) ParseSvgColor(bg, out cellFillColor, out cellFillOpacity);
-                    if (fg != null) textColorOverride = fg;
+                    // Core/TableStyles resolver — same call shape used in
+                    // HtmlPreview.Tables.cs. Returns null for unknown style
+                    // ids; an unstyled (or unrecognised) table simply gets
+                    // no fill, matching previous behaviour for that case.
+                    var resolved = TableStyleResolver.Resolve(
+                        tableStyleId,
+                        new CellPosition(
+                            RowIndex: rowIndex, ColIndex: colIndex,
+                            RowCount: totalRowsSvg, ColCount: colWidths.Count,
+                            HasFirstRow: hasFirstRow, HasLastRow: hasLastRow,
+                            HasFirstCol: hasFirstCol, HasLastCol: hasLastCol,
+                            HasBandedRows: hasBandRow, HasBandedCols: hasBandCol),
+                        themeColors);
+                    if (resolved?.Fill != null)
+                        ParseSvgColor(resolved.Fill, out cellFillColor, out cellFillOpacity);
+                    if (resolved?.TextColor != null)
+                        textColorOverride = resolved.TextColor;
                 }
 
                 // Cell background
@@ -1143,7 +1155,7 @@ public partial class PowerPointHandler
     /// Render text using foreignObject + HTML for automatic wrapping.
     /// Can be swapped with RenderTextBodySvg for pure SVG output.
     /// </summary>
-    private static void RenderTextBodyFO(StringBuilder sb, OpenXmlElement textBody,
+    private void RenderTextBodyFO(StringBuilder sb, OpenXmlElement textBody,
         Dictionary<string, string> themeColors,
         double shapeW, double shapeH,
         double lIns, double tIns, double rIns, double bIns,
@@ -1265,7 +1277,27 @@ public partial class PowerPointHandler
                     var font = rp?.GetFirstChild<Drawing.LatinFont>()?.Typeface?.Value
                         ?? rp?.GetFirstChild<Drawing.EastAsianFont>()?.Typeface?.Value;
                     if (font != null && !font.StartsWith("+", StringComparison.Ordinal))
-                        styles.Add($"font-family:'{HtmlEncode(font)}'");
+                    {
+                        // foreignObject renders this span as live HTML, so the
+                        // font-family value sits inside an inline CSS string.
+                        // HtmlEncode only protects the HTML attribute layer
+                        // (turns ' into &#39; which the parser unescapes back
+                        // into ' inside CSS), letting a crafted theme typeface
+                        // close the CSS string and inject rules. Use the same
+                        // allowlist CssSanitize as the HtmlPreview path.
+                        var safe = CssSanitize(font);
+                        if (!string.IsNullOrEmpty(safe))
+                            styles.Add($"font-family:'{safe}'");
+                    }
+                    else
+                    {
+                        // CONSISTENCY(svg-default-font): when a run has no
+                        // explicit font, emit the same Office default chain
+                        // the title-text path uses (around L676) so SVG
+                        // matches PowerPoint's effective Calibri default.
+                        // CJK fallback is locale-driven via ResolveDocCjkFallback.
+                        styles.Add($"font-family:'{OfficeDefaultFonts.MinorLatin}',{ResolveDocCjkFallback()},sans-serif");
+                    }
 
                     // Size — resolve per-paragraph from placeholder inheritance chain
                     int? paraDefaultFontSize = null;
@@ -1352,7 +1384,9 @@ public partial class PowerPointHandler
 
             // Stars — inner radius from adj (default varies by star type)
             "star4" => BuildStar(4, w, h, ReadAdjValue(presetGeom, 0, 50000) / 100000.0),
-            "star5" => BuildStar(5, w, h, ReadAdjValue(presetGeom, 0, 19098) / 100000.0),
+            // CONSISTENCY(star5-adj-scale): OOXML adj for star5 is fraction * 50000 (default 19098 → inner ratio ~0.382).
+            // Matches Star5Polygon in PowerPointHandler.HtmlPreview.Css.cs.
+            "star5" => BuildStar(5, w, h, ReadAdjValue(presetGeom, 0, 19098) / 50000.0),
             "star6" => BuildStar(6, w, h, ReadAdjValue(presetGeom, 0, 28868) / 100000.0),
             "star8" => BuildStar(8, w, h, ReadAdjValue(presetGeom, 0, 38268) / 100000.0),
             "star10" => BuildStar(10, w, h, ReadAdjValue(presetGeom, 0, 38268) / 100000.0),
@@ -1708,18 +1742,14 @@ public partial class PowerPointHandler
         int r = 0, g = 0, b = 0;
         if (rgb != null && rgb.Length >= 6)
         {
-            r = Convert.ToInt32(rgb[..2], 16);
-            g = Convert.ToInt32(rgb[2..4], 16);
-            b = Convert.ToInt32(rgb[4..6], 16);
+            (r, g, b) = ColorMath.HexToRgb(rgb);
         }
         else
         {
             var schemeColor = shadow.GetFirstChild<Drawing.SchemeColor>()?.Val?.InnerText;
             if (schemeColor != null && themeColors.TryGetValue(schemeColor, out var sc) && sc.Length >= 6)
             {
-                r = Convert.ToInt32(sc[..2], 16);
-                g = Convert.ToInt32(sc[2..4], 16);
-                b = Convert.ToInt32(sc[4..6], 16);
+                (r, g, b) = ColorMath.HexToRgb(sc);
             }
         }
 
@@ -1752,18 +1782,14 @@ public partial class PowerPointHandler
         var rgb = glow.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
         if (rgb != null && rgb.Length >= 6)
         {
-            r = Convert.ToInt32(rgb[..2], 16);
-            g = Convert.ToInt32(rgb[2..4], 16);
-            b = Convert.ToInt32(rgb[4..6], 16);
+            (r, g, b) = ColorMath.HexToRgb(rgb);
         }
         else
         {
             var scheme = glow.GetFirstChild<Drawing.SchemeColor>()?.Val?.InnerText;
             if (scheme != null && themeColors.TryGetValue(scheme, out var sc) && sc.Length >= 6)
             {
-                r = Convert.ToInt32(sc[..2], 16);
-                g = Convert.ToInt32(sc[2..4], 16);
-                b = Convert.ToInt32(sc[4..6], 16);
+                (r, g, b) = ColorMath.HexToRgb(sc);
             }
         }
 

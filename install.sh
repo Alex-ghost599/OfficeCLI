@@ -1,8 +1,28 @@
 #!/bin/bash
 set -e
 
-REPO="iOfficeAI/OfficeCli"
+REPO="iOfficeAI/OfficeCLI"
 BINARY_NAME="officecli"
+
+# Mirror primary, github fallback. The mirror is exercised first so issues
+# surface there fast; github is the final safety net.
+MIRROR_BASE="https://d.officecli.ai"
+GITHUB_RELEASE_BASE="https://github.com/$REPO/releases/latest/download"
+GITHUB_RAW_BASE="https://raw.githubusercontent.com/$REPO/main"
+
+# fetch_with_fallback <primary_url> <fallback_url> <output_path>
+# Returns 0 if either source delivered the file, non-zero if both failed.
+# Short connect-timeout on primary so a dead mirror doesn't add minutes
+# of stall before falling through.
+fetch_with_fallback() {
+    local primary="$1" fallback="$2" out="$3"
+    if curl -fsSL --max-time 300 --connect-timeout 5 "$primary" -o "$out" 2>/dev/null; then
+        echo "  (via mirror)"
+        return 0
+    fi
+    echo "  mirror unreachable, falling back to github..."
+    curl -fsSL --max-time 300 "$fallback" -o "$out" 2>/dev/null
+}
 
 # Detect platform
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -51,14 +71,18 @@ esac
 
 SOURCE=""
 
-# Step 1: Try downloading from GitHub
-DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/$ASSET"
-CHECKSUM_URL="https://github.com/$REPO/releases/latest/download/SHA256SUMS"
-echo "Downloading OfficeCli ($ASSET)..."
-if curl -fsSL "$DOWNLOAD_URL" -o "/tmp/$BINARY_NAME" 2>/dev/null; then
+# Step 1: Try downloading (mirror first, github fallback)
+echo "Downloading OfficeCLI ($ASSET)..."
+if fetch_with_fallback \
+        "$MIRROR_BASE/releases/latest/download/$ASSET" \
+        "$GITHUB_RELEASE_BASE/$ASSET" \
+        "/tmp/$BINARY_NAME"; then
     # Verify checksum if available
     CHECKSUM_OK=false
-    if curl -fsSL "$CHECKSUM_URL" -o "/tmp/officecli-SHA256SUMS" 2>/dev/null; then
+    if fetch_with_fallback \
+            "$MIRROR_BASE/releases/latest/download/SHA256SUMS" \
+            "$GITHUB_RELEASE_BASE/SHA256SUMS" \
+            "/tmp/officecli-SHA256SUMS"; then
         EXPECTED=$(grep "$ASSET" "/tmp/officecli-SHA256SUMS" | awk '{print $1}')
         if [ -n "$EXPECTED" ]; then
             if command -v sha256sum >/dev/null 2>&1; then
@@ -104,7 +128,7 @@ if [ -z "$SOURCE" ]; then
 fi
 
 if [ -z "$SOURCE" ]; then
-    echo "Error: Could not find a valid OfficeCli binary."
+    echo "Error: Could not find a valid OfficeCLI binary."
     echo "Download manually from: https://github.com/$REPO/releases"
     exit 1
 fi
@@ -119,27 +143,80 @@ else
 fi
 
 mkdir -p "$INSTALL_DIR"
-cp "$SOURCE" "$INSTALL_DIR/$BINARY_NAME"
-chmod +x "$INSTALL_DIR/$BINARY_NAME"
+# Atomic replace: stage as .new alongside the target, sign there, then rename.
+# Overwriting the binary in place would trash the text segment of any
+# running officecli process (macOS does not block ETXTBSY), leaving it
+# stuck in uninterruptible `UE` state on the next code page fault.
+cp "$SOURCE" "$INSTALL_DIR/$BINARY_NAME.new"
+chmod +x "$INSTALL_DIR/$BINARY_NAME.new"
+
+# macOS: clear the quarantine flag, then ensure the staged copy carries a
+# valid signature (Apple Silicon refuses to exec an unsigned Mach-O).
+# Release binaries are Developer ID signed + notarized by CI; a forced
+# ad-hoc re-sign would strip that signature and invalidate notarization,
+# so only ad-hoc sign as a fallback when no valid signature is present.
+# Done on the staged .new copy so the live binary is never mutated in place.
+if [ "$(uname -s)" = "Darwin" ]; then
+    xattr -d com.apple.quarantine "$INSTALL_DIR/$BINARY_NAME.new" 2>/dev/null || true
+    if ! codesign -v --strict "$INSTALL_DIR/$BINARY_NAME.new" 2>/dev/null; then
+        codesign -s - -f "$INSTALL_DIR/$BINARY_NAME.new" 2>/dev/null || true
+    fi
+fi
+
+mv -f "$INSTALL_DIR/$BINARY_NAME.new" "$INSTALL_DIR/$BINARY_NAME"
+
+# Auto-add to PATH if needed
+case ":$PATH:" in
+    *":$INSTALL_DIR:"*) ;;
+    *)
+        PATH_LINE="export PATH=\"$INSTALL_DIR:\$PATH\""
+        if [ "$(uname -s)" = "Darwin" ]; then
+            SHELL_RC="$HOME/.zshrc"
+        elif [ -n "$ZSH_VERSION" ]; then
+            SHELL_RC="$HOME/.zshrc"
+        else
+            SHELL_RC="$HOME/.bashrc"
+        fi
+        if ! grep -qF "$INSTALL_DIR" "$SHELL_RC" 2>/dev/null; then
+            echo "" >> "$SHELL_RC"
+            echo "$PATH_LINE" >> "$SHELL_RC"
+            echo "Added $INSTALL_DIR to PATH in $SHELL_RC"
+            echo "Run 'source $SHELL_RC' or restart your terminal to apply."
+        fi
+        ;;
+esac
 
 rm -f "/tmp/$BINARY_NAME"
 
-echo "OfficeCli installed successfully!"
-echo "Binary path: $INSTALL_DIR/$BINARY_NAME"
-echo "No environment or agent configuration has been changed."
-echo "Optional next step: $INSTALL_DIR/$BINARY_NAME setup"
+# Step 4: Install AI agent skills (first install only)
+SKILL_MARKER="$INSTALL_DIR/.officecli-skills-installed"
+if [ ! -f "$SKILL_MARKER" ]; then
+    SKILL_TARGETS=""
+    for tool_dir in "$HOME/.claude:Claude Code" "$HOME/.copilot:GitHub Copilot" "$HOME/.agents:Codex CLI" "$HOME/.cursor:Cursor" "$HOME/.windsurf:Windsurf" "$HOME/.minimax:MiniMax CLI" "$HOME/.openclaw:OpenClaw" "$HOME/.nanobot/workspace:NanoBot" "$HOME/.zeroclaw/workspace:ZeroClaw" "$HOME/.hermes:Hermes Agent"; do
+        dir="${tool_dir%%:*}"
+        name="${tool_dir##*:}"
+        if [ -d "$dir" ]; then
+            SKILL_TARGETS="$SKILL_TARGETS $dir/skills/officecli"
+            echo "$name detected."
+        fi
+    done
 
-if [ -t 0 ] && [ -t 1 ]; then
-    printf "Run optional setup now? [y/N]: "
-    read -r RUN_SETUP
-    case "$RUN_SETUP" in
-        y|Y|yes|YES)
-            "$INSTALL_DIR/$BINARY_NAME" setup
-            ;;
-        *)
-            echo "Skipped setup. You can run '$INSTALL_DIR/$BINARY_NAME setup' later."
-            ;;
-    esac
-else
-    echo "Non-interactive install detected. Run '$INSTALL_DIR/$BINARY_NAME setup' later if you want PATH, skills, MCP, macOS compatibility tweaks, or auto-update."
+    if [ -n "$SKILL_TARGETS" ]; then
+        echo "Downloading officecli skill..."
+        if fetch_with_fallback \
+                "$MIRROR_BASE/SKILL.md" \
+                "$GITHUB_RAW_BASE/SKILL.md" \
+                "/tmp/officecli-skill.md"; then
+            for target in $SKILL_TARGETS; do
+                mkdir -p "$target"
+                cp "/tmp/officecli-skill.md" "$target/SKILL.md"
+                echo "  Installed: $target/SKILL.md"
+            done
+            rm -f "/tmp/officecli-skill.md"
+        fi
+    fi
+    touch "$SKILL_MARKER"
 fi
+
+echo "OfficeCLI installed successfully!"
+echo "Run 'officecli --help' to get started."

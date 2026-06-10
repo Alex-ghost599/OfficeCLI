@@ -1,4 +1,4 @@
-// Copyright 2025 OfficeCli (officecli.ai)
+// Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
 using System.Text.RegularExpressions;
@@ -27,6 +27,22 @@ public partial class ExcelHandler
         bool? isEmpty = null;
         string? typeEquals = null;
         string? typeNotEquals = null;
+
+        // Normalize path-style selectors: "/Sheet1/cell[...]" → "Sheet1!cell[...]"
+        if (selector.StartsWith('/'))
+        {
+            var slashIdx = selector.IndexOf('/', 1);
+            if (slashIdx > 0)
+            {
+                sheet = selector[1..slashIdx];
+                selector = selector[(slashIdx + 1)..];
+            }
+            else
+            {
+                // Just "/cell" — strip leading slash
+                selector = selector[1..];
+            }
+        }
 
         // Check for sheet prefix: Sheet1!cell[...]
         // Only treat '!' as sheet separator if NOT part of '!=' operator
@@ -159,12 +175,55 @@ public partial class ExcelHandler
         return "Number";
     }
 
+    // CONSISTENCY(cell-selector-alias): short attribute names in cell selectors
+    // map to their canonical DocumentNode.Format keys. Users write
+    // `cell[bold=true]` but Get stores `font.bold`.
+    private static readonly Dictionary<string, string> _cellSelectorAliases =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["bold"] = "font.bold",
+            ["italic"] = "font.italic",
+            // `strike`/`underline` are themselves the canonical cell Format keys
+            // (Get emits them unprefixed), so they map to identity — no remap.
+            ["underline"] = "underline",
+            ["strike"] = "strike",
+            ["font"] = "font.name",
+            ["size"] = "font.size",
+            ["color"] = "font.color",
+        };
+
+    private static string ResolveCellFormatKey(string key)
+        => _cellSelectorAliases.TryGetValue(key, out var canonical) ? canonical : key;
+
+    // CONSISTENCY(cell-selector-alias): exposed so the CLI query post-filter
+    // (AttributeFilter.ApplyWithWarnings) can normalize user-written keys like
+    // "bold" -> "font.bold" before matching against DocumentNode.Format. Without
+    // this, handler-level MatchesCellSelector would accept cell[bold=true] and
+    // return hits, then the CLI post-filter would drop them all because Format
+    // only has "font.bold".
+    public static string ResolveCellAttributeAlias(string key)
+        => _cellSelectorAliases.TryGetValue(key, out var canonical) ? canonical : key;
+
+    // CONSISTENCY(cell-selector-alias): true when a query selector targets cells,
+    // accounting for an optional sheet prefix — bare "cell[...]", Excel-native
+    // "Sheet1!cell[...]", or path-style "/Sheet1/cell[...]". The CLI and resident
+    // query post-filters use this to decide whether to apply cell attribute-alias
+    // normalization (bold -> font.bold, ...). Without stripping the prefix, a
+    // sheet-scoped cell selector skipped normalization and every format-attribute
+    // filter silently dropped all matches.
+    public static bool SelectorTargetsCells(string? selector)
+    {
+        var element = Regex.Replace((selector ?? "").TrimStart(), @"^(?:[^/!\[]+!|/[^/]+/)", "");
+        return element.StartsWith("cell", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool MatchesFormatAttributes(DocumentNode node, CellSelector selector)
     {
         if (selector.FormatEquals != null)
         {
-            foreach (var (key, expected) in selector.FormatEquals)
+            foreach (var (rawKey, expected) in selector.FormatEquals)
             {
+                var key = ResolveCellFormatKey(rawKey);
                 var matchedKey = node.Format.Keys.FirstOrDefault(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase));
                 if (matchedKey == null) return false;
                 var actual = node.Format[matchedKey]?.ToString() ?? "";
@@ -174,8 +233,9 @@ public partial class ExcelHandler
         }
         if (selector.FormatNotEquals != null)
         {
-            foreach (var (key, expected) in selector.FormatNotEquals)
+            foreach (var (rawKey, expected) in selector.FormatNotEquals)
             {
+                var key = ResolveCellFormatKey(rawKey);
                 var matchedKey = node.Format.Keys.FirstOrDefault(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase));
                 var actual = matchedKey != null ? (node.Format[matchedKey]?.ToString() ?? "") : "";
                 if (ColorNormalizedEquals(actual, expected))
@@ -202,9 +262,13 @@ public partial class ExcelHandler
         if (!match.Success)
             throw new ArgumentException($"Invalid cell reference: '{cellRef}'. Expected format like 'A1', 'B2', 'XFD1048576'.");
         var col = match.Groups[1].Value.ToUpperInvariant();
-        var row = int.Parse(match.Groups[2].Value);
-        if (row < 1 || row > 1048576)
-            throw new ArgumentException($"Row {row} in cell reference '{cellRef}' is out of range. Valid range: 1-1048576.");
+        // Use long to avoid OverflowException when malformed files carry row numbers
+        // outside int range (e.g. uint.MaxValue). Surface a semantic ArgumentException
+        // (the same exception type used for other invalid refs below) instead.
+        if (!long.TryParse(match.Groups[2].Value, out var rowLong) || rowLong < 1 || rowLong > 1048576)
+            throw new ArgumentException(
+                $"Row {match.Groups[2].Value} in cell reference '{cellRef}' is out of valid range. Valid range: 1-1048576.");
+        var row = (int)rowLong;
         var colIdx = ColumnNameToIndex(col);
         if (colIdx < 1 || colIdx > 16384)
             throw new ArgumentException($"Column '{col}' in cell reference '{cellRef}' is out of range. Valid range: A-XFD (1-16384).");

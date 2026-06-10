@@ -1,4 +1,4 @@
-// Copyright 2025 OfficeCli (officecli.ai)
+// Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
 using System.Text;
@@ -8,50 +8,64 @@ using System.Text.Json.Serialization;
 
 namespace OfficeCli.Core;
 
-public enum OutputFormat
+internal enum OutputFormat
 {
     Text,
     Json
 }
 
-public class ViewResult
+internal class ViewResult
 {
+    [JsonPropertyName("view")]
     public string View { get; set; } = "";
+    [JsonPropertyName("content")]
     public string Content { get; set; } = "";
 }
 
-public class NodesResult
+internal class NodesResult
 {
+    [JsonPropertyName("matches")]
     public int Matches { get; set; }
+    [JsonPropertyName("results")]
     public List<DocumentNode> Results { get; set; } = new();
 }
 
-public class IssuesResult
+internal class IssuesResult
 {
+    [JsonPropertyName("count")]
     public int Count { get; set; }
+    [JsonPropertyName("issues")]
     public List<DocumentIssue> Issues { get; set; } = new();
 }
 
-public class ErrorResult
+internal class ErrorResult
 {
+    [JsonPropertyName("error")]
     public string Error { get; set; } = "";
+    [JsonPropertyName("code")]
     public string? Code { get; set; }
+    [JsonPropertyName("suggestion")]
     public string? Suggestion { get; set; }
+    [JsonPropertyName("help")]
     public string? Help { get; set; }
+    [JsonPropertyName("validValues")]
     public string[]? ValidValues { get; set; }
 }
 
-public class CliWarning
+internal class CliWarning
 {
+    [JsonPropertyName("message")]
     public string Message { get; set; } = "";
+    [JsonPropertyName("code")]
     public string? Code { get; set; }
+    [JsonPropertyName("suggestion")]
     public string? Suggestion { get; set; }
 }
 
 /// <summary>
 /// Thread-static context for capturing warnings during command execution in JSON mode.
 /// </summary>
-public static class WarningContext
+internal static class WarningContext
 {
     [ThreadStatic]
     private static List<CliWarning>? _warnings;
@@ -87,16 +101,28 @@ public static class WarningContext
 [JsonSerializable(typeof(List<DocumentNode>))]
 [JsonSerializable(typeof(List<DocumentIssue>))]
 [JsonSerializable(typeof(Dictionary<string, object?>))]
+[JsonSerializable(typeof(List<Dictionary<string, object?>>))]
 [JsonSerializable(typeof(bool))]
 [JsonSerializable(typeof(int))]
 [JsonSerializable(typeof(long))]
 [JsonSerializable(typeof(short))]
 [JsonSerializable(typeof(uint))]
+// OOXML UInt16Value/ByteValue/UInt32Value/SByteValue/UInt64Value frequently
+// land in DocumentNode.Format[] as boxed primitives (e.g. chart hole/skip/
+// rotateX/style/firstSliceAngle). Without these JsonSerializable hooks the
+// source-gen polymorphic writer throws JsonTypeInfo missing-metadata when
+// `get --json` hits a node carrying any of them. See R43-6.
+[JsonSerializable(typeof(ushort))]
+[JsonSerializable(typeof(byte))]
+[JsonSerializable(typeof(sbyte))]
+[JsonSerializable(typeof(ulong))]
+[JsonSerializable(typeof(float))]
+[JsonSerializable(typeof(decimal))]
 [JsonSerializable(typeof(double))]
 [JsonSerializable(typeof(string))]
 internal partial class AppJsonContext : JsonSerializerContext;
 
-public static class OutputFormatter
+internal static class OutputFormatter
 {
     public static readonly JsonSerializerOptions PublicJsonOptions = new()
     {
@@ -115,11 +141,19 @@ public static class OutputFormatter
 
     /// <summary>
     /// Wraps pre-serialized data JSON into a unified envelope with optional warnings.
-    /// Output: { "success": true, "data": ..., "warnings": [...] }
+    /// Output: { "success": true|false, "data": ..., "warnings": [...] }
+    ///
+    /// CONTRACT: `success` reflects the *business* outcome of the command, not
+    /// process liveness. Pass `success: false` when the command ran to
+    /// completion but its judgment is "failed" (e.g. validate found schema
+    /// errors, batch had a failed step). For *probe* commands like
+    /// `view --mode issues`, success stays true even when issues are listed —
+    /// listing issues is the command's normal output, not a failure verdict.
+    /// See CLAUDE.md "JSON Envelope" for the per-command judgment table.
     /// </summary>
-    public static string WrapEnvelope(string dataJson, List<CliWarning>? warnings = null)
+    public static string WrapEnvelope(string dataJson, List<CliWarning>? warnings = null, bool success = true)
     {
-        var envelope = new JsonObject { ["success"] = true };
+        var envelope = new JsonObject { ["success"] = success };
 
         // Parse and embed data as-is (preserves original structure)
         try { envelope["data"] = JsonNode.Parse(dataJson); }
@@ -133,12 +167,19 @@ public static class OutputFormatter
 
     /// <summary>
     /// Wraps a plain text result (like "Updated ..." or "Added ...") into an envelope.
+    /// See WrapEnvelope's CONTRACT note for `success` semantics.
     /// </summary>
-    public static string WrapEnvelopeText(string message, List<CliWarning>? warnings = null, int? matched = null)
+    public static string WrapEnvelopeText(string message, List<CliWarning>? warnings = null, int? matched = null, bool success = true)
     {
         var envelope = new JsonObject
         {
-            ["success"] = true,
+            ["success"] = success,
+            // BUG-R6-04: `add --json` previously emitted only `message`,
+            // diverging from get/set/dump which surface a `data` field.
+            // Keep `message` for backwards compatibility but also expose
+            // it under `data` so a single parser (`.data`) works across
+            // every command's --json output.
+            ["data"] = message,
             ["message"] = message
         };
 
@@ -151,11 +192,11 @@ public static class OutputFormatter
         return envelope.ToJsonString(JsonOptions);
     }
 
-    public static string WrapEnvelopeWithData(string message, DocumentNode data, List<CliWarning>? warnings = null, int? matched = null)
+    public static string WrapEnvelopeWithData(string message, DocumentNode data, List<CliWarning>? warnings = null, int? matched = null, bool success = true)
     {
         var envelope = new JsonObject
         {
-            ["success"] = true,
+            ["success"] = success,
             ["message"] = message,
             ["data"] = JsonSerializer.SerializeToNode(data, AppJsonContext.Default.DocumentNode)
         };
@@ -209,7 +250,7 @@ public static class OutputFormatter
 
     private static ErrorResult BuildErrorResult(Exception ex)
     {
-        var result = new ErrorResult { Error = ex.Message };
+        var result = new ErrorResult { Error = MsysPathHint.AugmentMessage(ex.Message) };
 
         if (ex is CliException cli)
         {
@@ -243,6 +284,37 @@ public static class OutputFormatter
             return;
         }
 
+        // Pattern: "<ElementType> <N> not found" without the (total: …) tail —
+        // e.g. "Paragraph 99 not found" raised by Add when the parent index
+        // overshoots without the handler also reporting the total. Before
+        // this the message fell through to the internal_error catch-all even
+        // though semantically the same as the (total:…) variant.
+        var notFoundShortMatch = System.Text.RegularExpressions.Regex.Match(msg, @"^(\w+)\s+(\d+)\s+not found$");
+        if (notFoundShortMatch.Success)
+        {
+            result.Code = "not_found";
+            return;
+        }
+
+        // Pattern: "Path not found: …" — generic path-resolve failure raised
+        // by handlers when an absolute DOM path can't be walked. Surfacing
+        // this as not_found instead of internal_error mirrors how every
+        // other missing-element error is coded.
+        if (msg.StartsWith("Path not found:", StringComparison.Ordinal))
+        {
+            result.Code = "not_found";
+            return;
+        }
+
+        // Pattern: "Sheet not found: <name>" — xlsx-specific not_found surface.
+        // Handlers throw this when a worksheet name doesn't resolve; classify
+        // alongside other missing-element errors instead of internal_error.
+        if (msg.StartsWith("Sheet not found:", StringComparison.Ordinal))
+        {
+            result.Code = "not_found";
+            return;
+        }
+
         // Pattern: "Unknown part: X. Available: ..."
         var unknownPartMatch = System.Text.RegularExpressions.Regex.Match(msg, @"Unknown part: (.+?)\. Available: (.+)");
         if (unknownPartMatch.Success)
@@ -259,6 +331,82 @@ public static class OutputFormatter
             return;
         }
 
+        // Pattern: "Row <N> in cell reference '...' is out of valid range. …" /
+        // "Column '<X>' in cell reference '...' is out of range. …" —
+        // raised by ParseCellReference (ExcelHandler.Selector.cs) when a
+        // cell address overshoots Excel's XFD1048576 ceiling. The Set
+        // path already coerces row overflow into invalid_value via its
+        // "Invalid row index N." text; the Add path runs through
+        // ParseCellReference and previously fell through to
+        // internal_error. Map both shapes to invalid_value so add/set
+        // produce the same business code for the same overflow class.
+        if (msg.StartsWith("Row ", StringComparison.Ordinal)
+            && msg.Contains(" in cell reference ", StringComparison.Ordinal)
+            && msg.Contains(" out of ", StringComparison.Ordinal))
+        {
+            result.Code = "invalid_value";
+            return;
+        }
+        if (msg.StartsWith("Column '", StringComparison.Ordinal)
+            && msg.Contains(" in cell reference ", StringComparison.Ordinal)
+            && msg.Contains(" out of range", StringComparison.Ordinal))
+        {
+            result.Code = "invalid_value";
+            return;
+        }
+
+        // Pattern: "Cell value[ at A1] exceeds Excel's 32767-character limit
+        // (got N)" — EnsureCellValueLength rejects over-long cell text. It's an
+        // input-validation failure (the user supplied a value Excel can't store),
+        // not a handler crash; classify as invalid_value like the row/col overflow
+        // rules above, not internal_error.
+        if (msg.StartsWith("Cell value", StringComparison.Ordinal)
+            && msg.Contains("character limit", StringComparison.Ordinal))
+        {
+            result.Code = "invalid_value";
+            return;
+        }
+
+        // Pattern: "Cell <ref> not found" — raised by RemoveCell when the
+        // caller targets an empty/missing cell. Symmetric with the
+        // existing "Path not found:" / "Sheet not found:" rules; without
+        // it the message fell through to internal_error and agents had
+        // no stable code to distinguish a missing-cell remove from a
+        // genuine handler crash.
+        if (System.Text.RegularExpressions.Regex.IsMatch(msg, @"^Cell\s+[A-Z]+\d+\s+not found"))
+        {
+            result.Code = "not_found";
+            return;
+        }
+
+        // Pattern: "<Element> index N out of range (1..M)" / "(1-M)" — raised by
+        // the Excel handler when an index-based element (table, pivottable,
+        // slicer, cf, …) overshoots the live count. The separator varies ("..",
+        // "-") and the phrasing is "out of range" rather than "not found", so it
+        // missed every not_found pattern above and fell through to
+        // internal_error. Semantically identical to "X N not found (total: M)":
+        // the element does not exist. Classify as not_found, mirroring Word/PPTX.
+        if (System.Text.RegularExpressions.Regex.IsMatch(msg, @"\bout of range \(\d+\s*(?:\.\.|-)\s*\d+\)"))
+        {
+            result.Code = "not_found";
+            return;
+        }
+
+        // Pattern: "<thing> not found ..." with a quoted ('X') or bracket-indexed
+        // ([N]) identifier and/or a parenthetical/trailing clause — e.g.
+        // "Named range 'X' not found (no defined names in workbook)" or
+        // "slicer[N] not found on sheet 'Sheet1'". The bare "<Word> <N> not found"
+        // rules above don't match these shapes, so they fell through to
+        // internal_error. Any "not found" that survived the earlier, more
+        // specific rules is a missing-element access — code not_found.
+        // Exclude FileNotFoundException, which has its own file_not_found rule
+        // below (its message also contains "not found").
+        if (ex is not FileNotFoundException && msg.Contains(" not found", StringComparison.Ordinal))
+        {
+            result.Code = "not_found";
+            return;
+        }
+
         // Pattern: "Invalid font size: ..." / "Invalid color value: ..." / "Invalid ... value"
         if (msg.StartsWith("Invalid "))
         {
@@ -267,6 +415,37 @@ public static class OutputFormatter
             var validMatch = System.Text.RegularExpressions.Regex.Match(msg, @"Valid values?:\s*(.+?)\.?$");
             if (validMatch.Success)
                 result.ValidValues = validMatch.Groups[1].Value.Split(", ");
+            return;
+        }
+
+        // Pattern: "Unknown <thing>: ..." — handlers throw this when a token
+        // (chart type, geometry, anchor, …) doesn't match any known value.
+        // Same semantic class as "Invalid <…>" — surface invalid_value.
+        if (msg.StartsWith("Unknown ", StringComparison.Ordinal))
+        {
+            result.Code = "invalid_value";
+            var validMatch = System.Text.RegularExpressions.Regex.Match(msg, @"Valid values?:\s*(.+?)\.?$");
+            if (validMatch.Success)
+                result.ValidValues = validMatch.Groups[1].Value.Split(", ");
+            return;
+        }
+
+        // Pattern: "<Type> requires a '<prop>' property" — handler-side
+        // pre-condition check that a creation/Set call is missing a required
+        // property. Maps to missing_property like "X property is required".
+        if (System.Text.RegularExpressions.Regex.IsMatch(msg, @"requires a '\w+' property"))
+        {
+            result.Code = "missing_property";
+            return;
+        }
+
+        // Pattern: "<thing> already exists: <name>" — uniqueness violation
+        // (duplicate sheet name, defined name, etc). Distinct from
+        // invalid_value: the value is well-formed but collides with an
+        // existing entity.
+        if (msg.Contains("already exists", StringComparison.Ordinal))
+        {
+            result.Code = "duplicate_name";
             return;
         }
 
@@ -291,6 +470,61 @@ public static class OutputFormatter
             result.Code = "file_not_found";
             return;
         }
+
+        // Pattern: "Batch input must be a JSON array..."
+        if (msg.StartsWith("Batch input must be"))
+        {
+            result.Code = "invalid_input";
+            return;
+        }
+
+        // Pattern: System.Text.Json error like "'I' is an invalid start of a value..."
+        if (ex is System.Text.Json.JsonException)
+        {
+            result.Code = "invalid_json";
+            return;
+        }
+
+        // Pattern: "No shape found with @id=NNN" / "No <element> found with ..."
+        if (System.Text.RegularExpressions.Regex.IsMatch(msg, @"^No \w+ found with "))
+        {
+            result.Code = "not_found";
+            return;
+        }
+
+        // Pattern: System.Xml.XPath invalid expression — surfaces as
+        // XPathException with message "Expression must evaluate to a node-set."
+        // or similar parser-side text.
+        if (ex is System.Xml.XPath.XPathException
+            || msg.Contains("Expression must evaluate")
+            || msg.Contains("invalid token")
+            || msg.Contains("invalid XPath"))
+        {
+            result.Code = "invalid_xpath";
+            return;
+        }
+
+        // Pattern: file-system IO denial / disk errors (UnauthorizedAccess,
+        // DirectoryNotFound, generic IOException for path-level failures).
+        if (ex is UnauthorizedAccessException || ex is DirectoryNotFoundException
+            || ex is PathTooLongException)
+        {
+            result.Code = "io_error";
+            return;
+        }
+        if (ex is IOException && !(ex is FileNotFoundException))
+        {
+            result.Code = "io_error";
+            return;
+        }
+
+        // Final catch-all: every WrapEnvelopeError consumer expects a 'code'
+        // field for stable error routing. Unhandled exceptions previously
+        // produced { error: "..." } with no code, leaving agent callers to
+        // string-match free-form messages. internal_error mirrors the
+        // 'unknown business failure' bucket used by other envelope code paths.
+        if (string.IsNullOrEmpty(result.Code))
+            result.Code = "internal_error";
     }
 
     public static string FormatView(string view, string content, OutputFormat format)
@@ -307,7 +541,7 @@ public static class OutputFormatter
         if (format == OutputFormat.Json)
             return JsonSerializer.Serialize(node, AppJsonContext.Default.DocumentNode);
 
-        return FormatNodeAsText(node, 0);
+        return FormatNodeAsText(node);
     }
 
     public static string FormatNodes(List<DocumentNode> nodes, OutputFormat format)
@@ -316,13 +550,8 @@ public static class OutputFormatter
             return JsonSerializer.Serialize(new NodesResult { Matches = nodes.Count, Results = nodes }, AppJsonContext.Default.NodesResult);
 
         var sb = new StringBuilder();
-        sb.AppendLine($"Matches: {nodes.Count}");
         foreach (var node in nodes)
-        {
-            sb.AppendLine($"  {node.Path}: {node.Text ?? node.Preview ?? node.Type}");
-            foreach (var (key, val) in node.Format)
-                sb.AppendLine($"    {key}: {val}");
-        }
+            sb.AppendLine(FormatNodeOneline(node));
         return sb.ToString().TrimEnd();
     }
 
@@ -367,28 +596,75 @@ public static class OutputFormatter
         return sb.ToString().TrimEnd();
     }
 
-    private static string FormatNodeAsText(DocumentNode node, int indent)
+    private static string FormatNodeAsText(DocumentNode node)
     {
         var sb = new StringBuilder();
-        var prefix = new string(' ', indent * 2);
 
-        sb.Append($"{prefix}{node.Path} ({node.Type})");
-        if (node.Text != null) sb.Append($" \"{Truncate(node.Text, 60)}\"");
-        if (node.Style != null) sb.Append($" [{node.Style}]");
-        if (node.ChildCount > 0 && node.Children.Count == 0) sb.Append($" ({node.ChildCount} children)");
-        sb.AppendLine();
-
-        foreach (var (key, val) in node.Format)
-            sb.AppendLine($"{prefix}  {key}: {val}");
+        sb.AppendLine(FormatNodeOneline(node));
 
         foreach (var child in node.Children)
-            sb.Append(FormatNodeAsText(child, indent + 1));
+            sb.Append(FormatNodeAsText(child));
 
         return sb.ToString();
     }
 
-    private static string Truncate(string s, int maxLen)
+    /// <summary>
+    /// Single-line format: path (type) "text" children=N style=X key=val key=val ...
+    /// Grep-friendly: every line is a complete, self-contained record.
+    /// </summary>
+    private static string FormatNodeOneline(DocumentNode node)
     {
-        return s.Length > maxLen ? s[..maxLen] + "..." : s;
+        var sb = new StringBuilder();
+
+        sb.Append($"{node.Path} ({node.Type})");
+        if (node.Text != null) sb.Append($" \"{node.Text.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "").Replace("\n", "\\n")}\"");
+        if (node.ChildCount > 0 && node.Children.Count == 0) sb.Append($" children={node.ChildCount}");
+        if (node.Style != null) sb.Append($" style={node.Style}");
+
+        foreach (var (key, val) in node.Format)
+        {
+            // style is already shown via node.Style; skip duplicate
+            if (key == "style" && node.Style != null) continue;
+            sb.Append($" {key}={FormatNodeValue(val)}");
+        }
+
+        return sb.ToString();
     }
+
+    // Render a Format value for the one-line text output. Most values are
+    // primitives whose ToString is already correct, but some readers store
+    // structured values (e.g. paragraph `tabs` is a List<Dictionary>) and
+    // those need explicit formatting — the default ToString prints
+    // "System.Collections.Generic.List`1[...]" which is useless to users.
+    private static string FormatNodeValue(object? val)
+    {
+        if (val == null) return "";
+        if (val is string s) return s;
+        // Lower-case bool to match the canonical-value convention
+        // ("true"/"false"); .NET's default Boolean.ToString() returns
+        // "True"/"False", which leaks PascalCase into Format readbacks
+        // (header bold/italic, toc hyperlinks, validation flags, etc.).
+        if (val is bool b) return b ? "true" : "false";
+        if (val is System.Collections.IEnumerable e and not string)
+        {
+            var parts = new List<string>();
+            foreach (var item in e)
+            {
+                if (item is System.Collections.IDictionary d)
+                {
+                    var kvs = new List<string>();
+                    foreach (System.Collections.DictionaryEntry de in d)
+                        kvs.Add($"{de.Key}={de.Value}");
+                    parts.Add("{" + string.Join(",", kvs) + "}");
+                }
+                else
+                {
+                    parts.Add(item?.ToString() ?? "");
+                }
+            }
+            return "[" + string.Join(",", parts) + "]";
+        }
+        return val.ToString() ?? "";
+    }
+
 }

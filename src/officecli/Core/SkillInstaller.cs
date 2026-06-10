@@ -1,4 +1,4 @@
-// Copyright 2025 OfficeCli (officecli.ai)
+// Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
 using System.Reflection;
@@ -12,8 +12,15 @@ namespace OfficeCli.Core;
 /// - officecli skills install morph-ppt  → specific skill to all detected agents
 /// - officecli skills install claude     → base SKILL.md to specific agent (legacy)
 /// </summary>
-public static class SkillInstaller
+internal static class SkillInstaller
 {
+    // Umbrella skill folder name. Embedded via the `skills/**/*` glob in
+    // officecli.csproj — same logical-name shape as every sub-skill, no
+    // special-case resource path. Kept out of SkillMap on purpose so
+    // `officecli skills list` and `load_skill` only surface sub-skills.
+    private const string UmbrellaFolder = "officecli";
+    private static string UmbrellaResource => $"skills/{UmbrellaFolder}/SKILL.md";
+
     private static readonly (string[] Aliases, string DisplayName, string DetectDir, string SkillDir)[] Tools =
     [
         (["claude", "claude-code"],       "Claude Code",    ".claude",              Path.Combine(".claude", "skills")),
@@ -23,6 +30,7 @@ public static class SkillInstaller
         (["windsurf"],                    "Windsurf",       ".windsurf",            Path.Combine(".windsurf", "skills")),
         (["minimax", "minimax-cli"],      "MiniMax CLI",    ".minimax",             Path.Combine(".minimax", "skills")),
         (["opencode"],                    "OpenCode",       ".opencode",            Path.Combine(".opencode", "skills")),
+        (["hermes", "hermes-agent"],      "Hermes Agent",   ".hermes",              Path.Combine(".hermes", "skills")),
         (["openclaw"],                    "OpenClaw",       ".openclaw",            Path.Combine(".openclaw", "skills")),
         (["nanobot"],                     "NanoBot",        Path.Combine(".nanobot", "workspace"),   Path.Combine(".nanobot", "workspace", "skills")),
         (["zeroclaw"],                    "ZeroClaw",       Path.Combine(".zeroclaw", "workspace"),  Path.Combine(".zeroclaw", "workspace", "skills")),
@@ -35,6 +43,7 @@ public static class SkillInstaller
         ["word"]            = "officecli-docx",
         ["excel"]           = "officecli-xlsx",
         ["morph-ppt"]       = "morph-ppt",
+        ["morph-ppt-3d"]    = "morph-ppt-3d",
         ["pitch-deck"]      = "officecli-pitch-deck",
         ["academic-paper"]  = "officecli-academic-paper",
         ["data-dashboard"]  = "officecli-data-dashboard",
@@ -128,16 +137,15 @@ public static class SkillInstaller
         if (key == "install")
             return InstallBaseToAll();
 
-        // Check if it's a known skill name → install that skill to all detected agents
-        if (SkillMap.ContainsKey(key))
-            return InstallSkillToAll(key);
-
         // Check if second arg after "install" was passed via Program.cs
         // "all" → base SKILL.md to all detected agents
         if (key == "all")
             return InstallBaseToAll();
 
-        // Otherwise treat as agent target name (legacy: officecli skills claude)
+        // Otherwise treat as agent target name (legacy: officecli skills claude).
+        // The previous `officecli skills <skill>` shorthand for "install that
+        // skill to all agents" was removed — use the explicit `skills install
+        // <name>` form, or `load_skill <name>` if you only want the content.
         return InstallBaseToAgent(key);
     }
 
@@ -148,6 +156,117 @@ public static class SkillInstaller
     public static HashSet<string> InstallSkill(string skillName)
     {
         return InstallSkillToAll(skillName);
+    }
+
+    /// <summary>All known skill aliases, sorted, comma-joined for error messages.</summary>
+    public static string KnownSkillsList() => string.Join(", ", SkillMap.Keys.OrderBy(k => k));
+
+    /// <summary>
+    /// Return the embedded SKILL.md content for <paramref name="skillName"/> with
+    /// no side-effects and no stdout writes. Throws <see cref="ArgumentException"/>
+    /// on unknown skill or missing embedded resource. Used by both the CLI
+    /// `officecli load_skill &lt;name&gt;` command and the MCP `load_skill` tool —
+    /// shared so the two surfaces have identical semantics.
+    /// </summary>
+    public static string LoadSkillContent(string skillName)
+    {
+        if (!SkillMap.TryGetValue(skillName, out var folder))
+            throw new ArgumentException($"Unknown skill: {skillName}. Available: {KnownSkillsList()}");
+        var content = LoadEmbeddedResource($"skills/{folder}/SKILL.md");
+        if (content == null)
+            throw new ArgumentException($"Embedded SKILL.md not found for '{skillName}'");
+        return StripSetupSection(content);
+    }
+
+    /// <summary>
+    /// Drop the `## Setup` section from a SKILL.md before handing it to an
+    /// agent. Whoever just invoked load_skill obviously already has officecli
+    /// installed, so the curl-install instructions in that section are pure
+    /// noise eating the agent's context. The original on-disk/embedded file
+    /// keeps the section intact for humans browsing the repo on GitHub.
+    /// Boundary: from a line starting with "## Setup" up to (not including)
+    /// the next line starting with "## ".
+    /// </summary>
+    private static string StripSetupSection(string content)
+    {
+        var lines = content.Split('\n');
+        var sb = new StringBuilder(content.Length);
+        var inSetup = false;
+        foreach (var line in lines)
+        {
+            if (!inSetup && line.StartsWith("## Setup", StringComparison.Ordinal))
+            {
+                inSetup = true;
+                continue;
+            }
+            if (inSetup && line.StartsWith("## ", StringComparison.Ordinal))
+                inSetup = false;
+            if (!inSetup) sb.Append(line).Append('\n');
+        }
+        // Split+rejoin may introduce a trailing newline; preserve original behavior.
+        var result = sb.ToString();
+        if (!content.EndsWith("\n", StringComparison.Ordinal) && result.EndsWith("\n", StringComparison.Ordinal))
+            result = result[..^1];
+        return result;
+    }
+
+    /// <summary>
+    /// Install a specific skill by name to a single agent target.
+    /// Accepts either order: (skill, agent) or (agent, skill) — skill names and
+    /// agent aliases don't overlap so the order is auto-detected.
+    /// Called as: officecli skills install morph-ppt hermes  /  officecli skills install hermes morph-ppt
+    /// Skips agent detection — installs even if the agent's home dir is missing,
+    /// matching the legacy `officecli skills &lt;agent&gt;` behavior.
+    /// </summary>
+    public static HashSet<string> InstallSkillToAgentTarget(string firstArg, string secondArg)
+    {
+        var installed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Auto-detect token order
+        string? skillName = null;
+        string? agentKey = null;
+        if (SkillMap.ContainsKey(firstArg))
+        {
+            skillName = firstArg;
+            agentKey = secondArg;
+        }
+        else if (SkillMap.ContainsKey(secondArg))
+        {
+            skillName = secondArg;
+            agentKey = firstArg;
+        }
+
+        if (skillName is null)
+        {
+            Console.Error.WriteLine($"Unknown skill in: {firstArg} {secondArg}");
+            Console.Error.WriteLine($"Available skills: {string.Join(", ", SkillMap.Keys.OrderBy(k => k))}");
+            return installed;
+        }
+
+        var key = agentKey!.ToLowerInvariant();
+        var folder = SkillMap[skillName];
+
+        var tool = Tools.FirstOrDefault(t => t.Aliases.Contains(key));
+        if (tool.Aliases is null)
+        {
+            Console.Error.WriteLine($"Unknown agent: {agentKey}");
+            Console.Error.WriteLine("Supported: claude, copilot, codex, cursor, windsurf, minimax, opencode, openclaw, nanobot, zeroclaw, hermes");
+            return installed;
+        }
+
+        var files = GetEmbeddedSkillFiles(folder);
+        if (files.Count == 0)
+        {
+            Console.Error.WriteLine($"  No embedded files found for skill '{skillName}'");
+            return installed;
+        }
+
+        var skillDir = Path.Combine(Home, tool.SkillDir, folder);
+        InstallSkillFiles(tool.DisplayName, skillDir, files);
+        foreach (var alias in tool.Aliases)
+            installed.Add(alias);
+
+        return installed;
     }
 
     // ─── Base SKILL.md installation ───────────────────────────
@@ -162,7 +281,7 @@ public static class SkillInstaller
             if (Directory.Exists(Path.Combine(Home, tool.DetectDir)))
             {
                 found = true;
-                var targetPath = Path.Combine(Home, tool.SkillDir, "officecli", "SKILL.md");
+                var targetPath = Path.Combine(Home, tool.SkillDir, UmbrellaFolder, "SKILL.md");
                 InstallBaseFile(tool.DisplayName, targetPath);
                 foreach (var alias in tool.Aliases)
                     installed.Add(alias);
@@ -183,7 +302,7 @@ public static class SkillInstaller
         {
             if (tool.Aliases.Contains(agentKey))
             {
-                var targetPath = Path.Combine(Home, tool.SkillDir, "officecli", "SKILL.md");
+                var targetPath = Path.Combine(Home, tool.SkillDir, UmbrellaFolder, "SKILL.md");
                 InstallBaseFile(tool.DisplayName, targetPath);
                 foreach (var alias in tool.Aliases)
                     installed.Add(alias);
@@ -192,14 +311,20 @@ public static class SkillInstaller
         }
 
         Console.Error.WriteLine($"Unknown target: {agentKey}");
-        Console.Error.WriteLine("Supported: claude, copilot, codex, cursor, windsurf, minimax, opencode, openclaw, nanobot, zeroclaw, all");
-        Console.Error.WriteLine($"Or a skill name: {string.Join(", ", SkillMap.Keys.OrderBy(k => k))}");
+        Console.Error.WriteLine("Supported agents: claude, copilot, codex, cursor, windsurf, minimax, opencode, openclaw, nanobot, zeroclaw, hermes, all");
+        if (SkillMap.ContainsKey(agentKey))
+        {
+            Console.Error.WriteLine();
+            Console.Error.WriteLine($"'{agentKey}' is a skill name, not an agent. Did you mean:");
+            Console.Error.WriteLine($"  officecli skills install {agentKey}    (install to disk)");
+            Console.Error.WriteLine($"  officecli load_skill {agentKey}        (print SKILL.md to stdout)");
+        }
         return installed;
     }
 
     private static void InstallBaseFile(string displayName, string targetPath)
     {
-        var content = LoadEmbeddedResource("OfficeCli.Resources.skill-officecli.md");
+        var content = LoadEmbeddedResource(UmbrellaResource);
         if (content == null)
         {
             Console.Error.WriteLine($"  {displayName}: embedded resource not found");
@@ -212,7 +337,7 @@ public static class SkillInstaller
             return;
         }
 
-        Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+        SafeCreateDirectory(Path.GetDirectoryName(targetPath)!);
         File.WriteAllText(targetPath, content);
         Console.WriteLine($"  {displayName}: officecli installed ({targetPath})");
     }
@@ -245,12 +370,14 @@ public static class SkillInstaller
             {
                 found = true;
                 var skillDir = Path.Combine(Home, tool.SkillDir, folder);
-                var updated = InstallSkillFiles(tool.DisplayName, skillDir, files);
-                if (updated)
-                {
-                    foreach (var alias in tool.Aliases)
-                        installed.Add(alias);
-                }
+                InstallSkillFiles(tool.DisplayName, skillDir, files);
+                // CONSISTENCY(install-success): always add aliases when the
+                // agent dir exists, matching InstallBaseToAll's semantics.
+                // The exit code derived from this set is "install succeeded
+                // for these agents", not "files were rewritten" — idempotent
+                // re-install of an up-to-date skill must still report success.
+                foreach (var alias in tool.Aliases)
+                    installed.Add(alias);
             }
         }
 
@@ -276,7 +403,7 @@ public static class SkillInstaller
             if (File.Exists(targetPath) && File.ReadAllText(targetPath) == rewritten)
                 continue;
 
-            Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+            SafeCreateDirectory(Path.GetDirectoryName(targetPath)!);
             File.WriteAllText(targetPath, rewritten);
             anyUpdated = true;
         }
@@ -287,6 +414,132 @@ public static class SkillInstaller
             Console.WriteLine($"  {displayName}: {Path.GetFileName(targetDir)} already up to date");
 
         return anyUpdated;
+    }
+
+    // ─── Auto-refresh after binary upgrade ───────────────────
+
+    /// <summary>
+    /// Re-install only the skill files that are *already present* in detected
+    /// agent directories. Called by UpdateChecker after a binary upgrade so
+    /// installed skills stay in sync with the new binary's embedded copies.
+    ///
+    /// Conservative on purpose:
+    ///   - Only refreshes skills the user previously installed (presence of
+    ///     SKILL.md per skill folder).
+    ///   - Never adds new agents or new sub-skills.
+    ///   - Silent unless something actually changed (one summary line on stderr).
+    ///   - Identical-content writes are skipped (existing diff-and-write path).
+    /// </summary>
+    internal static int RefreshInstalled()
+    {
+        var changedFiles = 0;
+        var changedTargets = new List<string>();
+
+        foreach (var tool in Tools)
+        {
+            // Per-tool isolation: a permission/IO error in one agent's skill
+            // dir must not abort the refresh for other agents. Each tool's
+            // base SKILL.md and each of its sub-skills are wrapped
+            // individually so partial progress is preserved.
+            if (!Directory.Exists(Path.Combine(Home, tool.DetectDir))) continue;
+            var skillsDir = Path.Combine(Home, tool.SkillDir);
+            if (!Directory.Exists(skillsDir)) continue;
+
+            // Base SKILL.md
+            try
+            {
+                var basePath = Path.Combine(skillsDir, UmbrellaFolder, "SKILL.md");
+                if (File.Exists(basePath))
+                {
+                    var content = LoadEmbeddedResource(UmbrellaResource);
+                    if (content != null && File.ReadAllText(basePath) != content)
+                    {
+                        File.WriteAllText(basePath, content);
+                        changedFiles++;
+                        changedTargets.Add($"{tool.DisplayName}/officecli");
+                    }
+                }
+            }
+            catch { /* per-agent failure is non-fatal — keep going */ }
+
+            // Sub-skills present in this agent's skill directory
+            foreach (var folder in SkillMap.Values)
+            {
+                try
+                {
+                    var subSkillFile = Path.Combine(skillsDir, folder, "SKILL.md");
+                    if (!File.Exists(subSkillFile)) continue;
+
+                    var files = GetEmbeddedSkillFiles(folder);
+                    if (files.Count == 0) continue;
+
+                    var targetDir = Path.Combine(skillsDir, folder);
+                    var n = RewriteSkillFilesQuiet(targetDir, files);
+                    if (n > 0)
+                    {
+                        changedFiles += n;
+                        changedTargets.Add($"{tool.DisplayName}/{folder}");
+                    }
+                }
+                catch { /* per-skill failure is non-fatal */ }
+            }
+        }
+
+        if (changedFiles > 0)
+            Console.Error.WriteLine($"officecli: refreshed {changedFiles} skill file(s) after upgrade ({string.Join(", ", changedTargets)})");
+
+        return changedFiles;
+    }
+
+    /// <summary>Quiet variant of <see cref="InstallSkillFiles"/>: returns the
+    /// number of files rewritten, prints nothing per file. Used by
+    /// <see cref="RefreshInstalled"/>.</summary>
+    private static int RewriteSkillFilesQuiet(string targetDir, Dictionary<string, string> files)
+    {
+        var n = 0;
+        foreach (var (fileName, content) in files)
+        {
+            var targetPath = Path.Combine(targetDir, fileName);
+            var rewritten = fileName.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
+                ? RewriteFileReferences(content, fileName)
+                : content;
+
+            if (File.Exists(targetPath) && File.ReadAllText(targetPath) == rewritten)
+                continue;
+
+            SafeCreateDirectory(Path.GetDirectoryName(targetPath)!);
+            File.WriteAllText(targetPath, rewritten);
+            n++;
+        }
+        return n;
+    }
+
+    // ─── Directory helpers ───────────────────────────────────
+
+    /// <summary>
+    /// Like Directory.CreateDirectory but handles dangling symlinks:
+    /// if the path exists as a symlink whose target is missing, remove it first.
+    /// </summary>
+    private static void SafeCreateDirectory(string dir)
+    {
+        // CONSISTENCY(skill-install): dangling symlink guard — Directory.CreateDirectory
+        // throws IOException when a path component is a dangling symlink; detect and remove it.
+        // Use FileAttributes.ReparsePoint to detect symlinks regardless of whether target exists.
+        if (!Directory.Exists(dir))
+        {
+            try
+            {
+                var attrs = File.GetAttributes(dir);
+                if (attrs.HasFlag(FileAttributes.ReparsePoint))
+                {
+                    // Dangling symlink (or symlink to non-dir) — remove it so CreateDirectory can proceed
+                    File.Delete(dir);
+                }
+            }
+            catch (FileNotFoundException) { /* fine, doesn't exist at all */ }
+            catch (DirectoryNotFoundException) { /* fine, parent also missing */ }
+        }
+        Directory.CreateDirectory(dir);
     }
 
     // ─── Embedded resource helpers ───────────────────────────

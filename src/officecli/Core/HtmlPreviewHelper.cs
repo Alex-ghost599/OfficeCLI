@@ -1,4 +1,4 @@
-// Copyright 2025 OfficeCli (officecli.ai)
+// Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
 using DocumentFormat.OpenXml.Packaging;
@@ -8,8 +8,26 @@ namespace OfficeCli.Core;
 /// <summary>
 /// Shared helpers for HTML preview rendering across PowerPoint, Word, and Excel handlers.
 /// </summary>
-public static class HtmlPreviewHelper
+internal static class HtmlPreviewHelper
 {
+    /// <summary>
+    /// HTML-encode text for safe insertion into element content or double-quoted
+    /// attribute values: escapes &amp;, &lt;, &gt;, double-quote, and single-quote.
+    /// This is the plain entity-encoding shared by the PowerPoint, Excel, and chart
+    /// SVG renderers. (Word's preview uses a variant that additionally preserves
+    /// consecutive spaces as non-breaking spaces and does not escape the apostrophe —
+    /// see WordHandler.HtmlPreview.Css.HtmlEncode, kept separate by design.)
+    /// </summary>
+    public static string HtmlEncode(string text)
+    {
+        return text
+            .Replace("&", "&amp;")
+            .Replace("<", "&lt;")
+            .Replace(">", "&gt;")
+            .Replace("\"", "&quot;")
+            .Replace("'", "&#39;");
+    }
+
     /// <summary>
     /// Load an OpenXML part by its relationship ID and return the content as a base64 data URI.
     /// Returns null if the part cannot be found or read.

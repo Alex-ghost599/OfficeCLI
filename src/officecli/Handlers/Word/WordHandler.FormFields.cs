@@ -1,4 +1,4 @@
-// Copyright 2025 OfficeCli (officecli.ai)
+// Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
 using DocumentFormat.OpenXml;
@@ -44,6 +44,22 @@ public partial class WordHandler
         var enabled = ffData.GetFirstChild<Enabled>();
         node.Format["enabled"] = enabled?.Val?.Value ?? true;
 
+        // R14-bug3: ffData carries optional helpText/statusText/macro
+        // attribution + calcOnExit; surface them so dump/get callers
+        // (and AI agents introspecting a form field) see the full
+        // wrapper rather than just name/type/default.
+        var helpText = ffData.GetFirstChild<HelpText>()?.Val?.Value;
+        if (!string.IsNullOrEmpty(helpText)) node.Format["helpText"] = helpText;
+        var statusText = ffData.GetFirstChild<StatusText>()?.Val?.Value;
+        if (!string.IsNullOrEmpty(statusText)) node.Format["statusText"] = statusText;
+        var entryMacro = ffData.GetFirstChild<EntryMacro>()?.Val?.Value;
+        if (!string.IsNullOrEmpty(entryMacro)) node.Format["entryMacro"] = entryMacro;
+        var exitMacro = ffData.GetFirstChild<ExitMacro>()?.Val?.Value;
+        if (!string.IsNullOrEmpty(exitMacro)) node.Format["exitMacro"] = exitMacro;
+        var calcOnExit = ffData.GetFirstChild<CalculateOnExit>();
+        if (calcOnExit != null)
+            node.Format["calcOnExit"] = calcOnExit.Val?.Value ?? true;
+
         // Determine formfield type and read type-specific properties
         var textInput = ffData.GetFirstChild<TextInput>();
         var checkBox = ffData.GetFirstChild<CheckBox>();
@@ -51,36 +67,57 @@ public partial class WordHandler
 
         if (textInput != null)
         {
-            node.Format["formfieldType"] = "text";
+            // Schema canonical key is `type` (alias `formfieldtype`).
+                node.Format["type"] = "text";
             var defaultVal = textInput.GetFirstChild<DefaultTextBoxFormFieldString>()?.Val?.Value;
             if (defaultVal != null) node.Format["default"] = defaultVal;
             var maxLen = textInput.GetFirstChild<MaxLength>()?.Val?.Value;
             if (maxLen != null) node.Format["maxLength"] = (int)maxLen;
+            // R14-bug3: textInput.type and textInput.format govern how Word
+            // validates / formats the typed value (regular / number /
+            // date / currentTime / currentDate / calculated; \@ format
+            // mask). Both are optional but must round-trip through dump.
+            var textType = textInput.GetFirstChild<TextBoxFormFieldType>()?.Val?.InnerText;
+            if (!string.IsNullOrEmpty(textType)) node.Format["textType"] = textType;
+            var textFmt = textInput.GetFirstChild<Format>()?.Val?.Value;
+            if (!string.IsNullOrEmpty(textFmt)) node.Format["textFormat"] = textFmt;
             // Result text (current value)
             var resultText = string.Join("", ff.Field.ResultRuns.SelectMany(r => r.Elements<Text>()).Select(t => t.Text));
             node.Text = resultText;
         }
         else if (checkBox != null)
         {
-            node.Format["formfieldType"] = "checkbox";
+            node.Format["type"] = "checkbox";
             var checkedEl = checkBox.GetFirstChild<Checked>();
             var defaultEl = checkBox.GetFirstChild<DefaultCheckBoxFormFieldState>();
             var isChecked = checkedEl?.Val?.Value ?? defaultEl?.Val?.Value ?? false;
             node.Format["checked"] = isChecked;
+            // R14-bug3: checkBox.size (half-points) drives the visual size
+            // of the rendered checkmark; expose it so dump round-trips
+            // the value AddFormField defaults to 20.
+            var cbSize = checkBox.GetFirstChild<FormFieldSize>()?.Val?.Value;
+            if (!string.IsNullOrEmpty(cbSize)) node.Format["checkBoxSize"] = cbSize;
             node.Text = isChecked ? "true" : "false";
         }
         else if (dropDown != null)
         {
-            node.Format["formfieldType"] = "dropdown";
+            node.Format["type"] = "dropdown";
             var items = dropDown.Elements<ListEntryFormField>().Select(li => li.Val?.Value ?? "").ToList();
             if (items.Count > 0) node.Format["items"] = string.Join(",", items);
-            var defaultIdx = dropDown.GetFirstChild<DropDownListSelection>()?.Val?.Value ?? 0;
-            node.Format["default"] = (int)defaultIdx;
-            // Current selection
+            // BUG-DUMP-R27-3: <w:result> is the CURRENT selection, <w:default>
+            // is the default entry — surface them distinctly (the old code
+            // stored the selection under `default`, masking the real default
+            // and losing the selection on round-trip).
+            var resultIdx = dropDown.GetFirstChild<DropDownListSelection>()?.Val?.Value;
+            if (resultIdx != null) node.Format["result"] = (int)resultIdx;
+            var ddDefaultIdx = dropDown.GetFirstChild<DefaultDropDownListItemIndex>()?.Val?.Value;
+            if (ddDefaultIdx != null) node.Format["default"] = (int)ddDefaultIdx;
+            // Current display text follows the selection (w:result), else default.
+            var selIdx = resultIdx ?? ddDefaultIdx ?? 0;
             var resultText = string.Join("", ff.Field.ResultRuns.SelectMany(r => r.Elements<Text>()).Select(t => t.Text));
             node.Text = resultText;
-            if (string.IsNullOrEmpty(resultText) && defaultIdx < items.Count)
-                node.Text = items[(int)defaultIdx];
+            if (string.IsNullOrEmpty(resultText) && selIdx < items.Count)
+                node.Text = items[(int)selIdx];
         }
 
         // Editable status based on protection
@@ -208,7 +245,7 @@ public partial class WordHandler
             }
         }
 
-        _doc.MainDocumentPart?.Document?.Save();
+        SaveDoc();
         return unsupported;
     }
 
@@ -251,7 +288,14 @@ public partial class WordHandler
         else if (parent is Body bodyEl)
         {
             para = new Paragraph();
-            bodyEl.AppendChild(para);
+            // Honor index (ChildElements-based) and the Body's trailing sectPr
+            // — raw AppendChild put the paragraph AFTER sectPr, making the
+            // document schema-invalid.
+            InsertAtIndexOrAppend(bodyEl, para, index);
+            // index was consumed by the placement above; clear it so the
+            // later FormField re-threading (which also inspects index)
+            // doesn't try to rearrange runs inside the new paragraph.
+            index = null;
             var paraIdx = bodyEl.Elements<Paragraph>().ToList().IndexOf(para) + 1;
             parentPath = $"/body/{BuildParaPathSegment(para, paraIdx)}";
         }
@@ -263,7 +307,42 @@ public partial class WordHandler
         var ciProps = new Dictionary<string, string>(properties, StringComparer.OrdinalIgnoreCase);
         var ffType = ciProps.GetValueOrDefault("formfieldtype",
             ciProps.GetValueOrDefault("type", "text")).ToLowerInvariant();
-        var name = ciProps.GetValueOrDefault("name", $"ff_{Guid.NewGuid():N}"[..12]);
+        // Treat explicit name="" the same as missing name: auto-generate.
+        // Empty bookmark names are addressable-invalid (predicate validator
+        // rejects bare empty values), and the validator below would crash
+        // on name[0] if we let "" through.
+        var name = ciProps.GetValueOrDefault("name", "");
+        if (string.IsNullOrEmpty(name))
+            name = $"ff_{Guid.NewGuid():N}"[..12];
+        if (name.Any(c => c == '/' || c == '[' || c == ']'))
+            throw new ArgumentException(
+                $"Form field name '{name}' contains path-special characters " +
+                "('/', '[', ']'). These characters prevent later addressing via " +
+                "selectors. Use only letters, digits, '.', '_', '-' in form field names.");
+        // Form fields embed a BookmarkStart/End with the same name, so they
+        // must obey the same addressability rules as bookmarks (R18): no
+        // whitespace, no leading '@'/'\'', no embedded '"', and no duplicate
+        // names anywhere in the document.
+        if (name.Any(char.IsWhiteSpace) || name[0] == '@' || name[0] == '\'' || name.Contains('"'))
+            throw new ArgumentException(
+                $"Form field name '{name}' contains whitespace or quote/@ chars " +
+                "that prevent later addressing via bare attribute selectors. " +
+                "Use only letters, digits, '.', '_', '-' in form field names.");
+        // Word permits multiple form fields to share a name (a form with five
+        // "Check1" checkboxes is legal and common), so a hard reject broke
+        // dump→batch round-trip of any such document — the replay re-adds each
+        // field by its source name and the second one threw. The bookmark Id
+        // stays unique (allocated below), which is what Word actually requires;
+        // only the display name repeats. Warn instead of failing: selector
+        // addressing by name will resolve to the first match, but the field is
+        // preserved. (Mirrors the lenient duplicate-style-name handling.)
+        if (body.Descendants<BookmarkStart>()
+                .Any(b => string.Equals(b.Name?.Value, name, StringComparison.Ordinal)))
+        {
+            LastAddWarnings.Add(
+                $"form field name '{name}' duplicates an existing bookmark/field name — " +
+                "kept (Word allows it), but addressing by this name resolves to the first match.");
+        }
         var text = ciProps.GetValueOrDefault("text", ciProps.GetValueOrDefault("value", ""));
 
         // Generate unique bookmark ID
@@ -281,14 +360,35 @@ public partial class WordHandler
 
         var ffData = new FormFieldData();
         ffData.AppendChild(new FormFieldName { Val = name });
-        ffData.AppendChild(new Enabled());
+        // R14-bug3: honor an explicit enabled=false (defaults to enabled).
+        // FormFieldData schema order is: name, enabled, calcOnExit, entryMacro,
+        // exitMacro, helpText, statusText, type-specific child (textInput/
+        // checkBox/ddList). Append in that order so Word doesn't silently
+        // drop the wrappers.
+        if (ciProps.TryGetValue("enabled", out var enVal) && !ParseHelpers.IsTruthy(enVal))
+            ffData.AppendChild(new Enabled { Val = OnOffValue.FromBoolean(false) });
+        else
+            ffData.AppendChild(new Enabled());
+        if (ciProps.TryGetValue("calconexit", out var coeVal))
+            ffData.AppendChild(new CalculateOnExit { Val = OnOffValue.FromBoolean(ParseHelpers.IsTruthy(coeVal)) });
+        if (ciProps.TryGetValue("entrymacro", out var emVal) && !string.IsNullOrEmpty(emVal))
+            ffData.AppendChild(new EntryMacro { Val = emVal });
+        if (ciProps.TryGetValue("exitmacro", out var xmVal) && !string.IsNullOrEmpty(xmVal))
+            ffData.AppendChild(new ExitMacro { Val = xmVal });
+        if (ciProps.TryGetValue("helptext", out var htVal) && !string.IsNullOrEmpty(htVal))
+            ffData.AppendChild(new HelpText { Val = htVal });
+        if (ciProps.TryGetValue("statustext", out var stVal) && !string.IsNullOrEmpty(stVal))
+            ffData.AppendChild(new StatusText { Val = stVal });
 
         switch (ffType)
         {
             case "checkbox" or "check":
             {
                 var checkBox = new CheckBox();
-                checkBox.AppendChild(new FormFieldSize { Val = "20" }); // Default size in half-points
+                // R14-bug3: honor explicit checkBoxSize (half-points) so dump
+                // round-trips a user-customized checkbox size.
+                var cbSize = ciProps.GetValueOrDefault("checkboxsize", "20");
+                checkBox.AppendChild(new FormFieldSize { Val = cbSize });
                 var isChecked = ciProps.TryGetValue("checked", out var chkVal) && ParseHelpers.IsTruthy(chkVal);
                 checkBox.AppendChild(new DefaultCheckBoxFormFieldState { Val = new OnOffValue(isChecked) });
                 if (isChecked)
@@ -300,23 +400,69 @@ public partial class WordHandler
             case "dropdown" or "drop":
             {
                 var ddl = new DropDownListFormField();
+                // BUG-DUMP-R27-3: <w:ddList> schema order is result, default,
+                // listEntry* — the current selection (<w:result>) and default
+                // (<w:default>) precede the entries. Append them first so the
+                // dropdown's selected value survives dump→batch round-trip
+                // (was dropped entirely: neither element was ever written).
+                int? resultIdx = null;
+                if (ciProps.TryGetValue("result", out var resStr)
+                    && int.TryParse(resStr, out var resIdx))
+                {
+                    ddl.AppendChild(new DropDownListSelection { Val = resIdx });
+                    resultIdx = resIdx;
+                }
+                if (ciProps.TryGetValue("default", out var ddDefStr)
+                    && int.TryParse(ddDefStr, out var ddDefIdx))
+                    ddl.AppendChild(new DefaultDropDownListItemIndex { Val = ddDefIdx });
+                var entries = new List<string>();
                 if (ciProps.TryGetValue("items", out var items))
                 {
                     foreach (var item in items.Split(','))
-                        ddl.AppendChild(new ListEntryFormField { Val = item.Trim() });
+                    {
+                        var trimmed = item.Trim();
+                        entries.Add(trimmed);
+                        ddl.AppendChild(new ListEntryFormField { Val = trimmed });
+                    }
                 }
                 ffData.AppendChild(ddl);
-                // Default to first item if no text specified
-                if (string.IsNullOrEmpty(text) && ciProps.TryGetValue("items", out var itemsList))
+                // Initial display text: the selected entry when a result index
+                // was given, otherwise the first item (legacy default).
+                if (string.IsNullOrEmpty(text))
                 {
-                    var firstItem = itemsList.Split(',').FirstOrDefault()?.Trim();
-                    if (firstItem != null) text = firstItem;
+                    if (resultIdx is int ri && ri >= 0 && ri < entries.Count)
+                        text = entries[ri];
+                    else if (entries.Count > 0)
+                        text = entries[0];
                 }
                 break;
             }
             default: // "text"
             {
                 var textInput = new TextInput();
+                // R14-bug3: textType / textFormat \u2014 Word's <w:type>/<w:format>
+                // children of <w:textInput>. Schema order: type, default,
+                // maxLength, format.
+                if (ciProps.TryGetValue("texttype", out var ttVal) && !string.IsNullOrEmpty(ttVal))
+                {
+                    // TextBoxFormFieldType.Val is the typed EnumValue<TextBoxFormFieldValues>;
+                    // SDK rejects unknown names so normalize/validate via lowercase canonical
+                    // names (regular/number/date/currentTime/currentDate/calculated).
+                    var canon = ttVal.ToLowerInvariant() switch
+                    {
+                        "regular" => "regular",
+                        "number" => "number",
+                        "date" => "date",
+                        "currenttime" => "currentTime",
+                        "currentdate" => "currentDate",
+                        "calculated" => "calculated",
+                        _ => "regular"
+                    };
+                    var ttypEl = new TextBoxFormFieldType();
+                    ttypEl.Val = new EnumValue<TextBoxFormFieldValues>();
+                    ttypEl.Val.InnerText = canon;
+                    textInput.AppendChild(ttypEl);
+                }
                 if (ciProps.TryGetValue("default", out var defaultVal))
                 {
                     textInput.AppendChild(new DefaultTextBoxFormFieldString { Val = defaultVal });
@@ -326,6 +472,8 @@ public partial class WordHandler
                 }
                 if (ciProps.TryGetValue("maxlength", out var maxLenStr) && int.TryParse(maxLenStr, out var maxLen))
                     textInput.AppendChild(new MaxLength { Val = (short)maxLen });
+                if (ciProps.TryGetValue("textformat", out var tfVal) && !string.IsNullOrEmpty(tfVal))
+                    textInput.AppendChild(new Format { Val = tfVal });
                 ffData.AppendChild(textInput);
                 break;
             }
@@ -370,7 +518,31 @@ public partial class WordHandler
         var bookmarkEnd = new BookmarkEnd { Id = bkId };
         para.AppendChild(bookmarkEnd);
 
-        _doc.MainDocumentPart?.Document?.Save();
+        // CONSISTENCY(add-index): honor --index / --after / --before (#76).
+        // When an anchor/index was supplied, re-thread the 7 appended elements
+        // into the requested child-element position. Simpler than restructuring
+        // the construction path above.
+        if (index.HasValue)
+        {
+            // Snapshot: the 7 elements we just appended, in order.
+            var ffElements = para.ChildElements
+                .Reverse().Take(7).Reverse().ToList();
+            // The anchor position was computed against the children BEFORE we
+            // appended the 7 elements. Subtract those 7 from the current count
+            // to get the original anchor child.
+            var origChildCount = para.ChildElements.Count - ffElements.Count;
+            if (index.Value < origChildCount)
+            {
+                var anchor = para.ChildElements[index.Value];
+                foreach (var el in ffElements) el.Remove();
+                para.InsertBefore(ffElements[0], anchor);
+                for (int ffI = 1; ffI < ffElements.Count; ffI++)
+                    para.InsertAfter(ffElements[ffI], ffElements[ffI - 1]);
+            }
+            // else: index is at or past the end — current append position is correct.
+        }
+
+        SaveDoc();
 
         // Compute result path
         int ffIdx = 0;

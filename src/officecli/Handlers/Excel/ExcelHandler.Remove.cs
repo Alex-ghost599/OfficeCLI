@@ -1,4 +1,4 @@
-// Copyright 2025 OfficeCli (officecli.ai)
+// Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
 using System.Text.RegularExpressions;
@@ -6,15 +6,56 @@ using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using C = DocumentFormat.OpenXml.Drawing.Charts;
-using X14 = DocumentFormat.OpenXml.Office2010.Excel;
 using XDR = DocumentFormat.OpenXml.Drawing.Spreadsheet;
 
 namespace OfficeCli.Handlers;
 
 public partial class ExcelHandler
 {
-    public string? Remove(string path)
+    public string? Remove(string path, Dictionary<string, string>? properties = null)
     {
+        // Phase 4: trackChange.* is Word-only. Silently ignored here.
+        Modified = true;
+        // CONSISTENCY(container-remove-guard): reject removal of the
+        // workbook root up front. Sheet-level removal has its own guard
+        // (can't remove last sheet) further down and is a legitimate op;
+        // /workbook is not.
+        if (!string.IsNullOrEmpty(path)
+            && path.TrimEnd('/').Equals("/workbook", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException(
+                $"Cannot remove container element '{path}': it is a required structural element of the document.");
+
+        // Batch Remove: a selector path (not starting with '/') → Query → Remove
+        // each match, mirroring ExcelHandler.Set's selector branch. Row removals
+        // are TRUE shift-deletes (rows below shift up — see "row[N] — true shift
+        // delete"), so multiple matched rows MUST be removed in DESCENDING row
+        // order: deleting /Sheet/row[2] first renumbers the old row[4] to row[3]
+        // and the next delete would hit the wrong row. Non-row targets carry
+        // index 0 and keep a stable relative order.
+        if (!string.IsNullOrEmpty(path)
+            && (!path.StartsWith("/") || Core.AttributeFilter.IsContentFilterPath(path)))
+        {
+            // Narrow via the shared engine (same as Set / query): pure-AND on the
+            // legacy path, `or` selectors queried bracket-stripped then narrowed by
+            // the boolean expression tree. The IsContentFilterPath arm routes a
+            // `/`-scoped content filter (`/Sheet1/cell[value>5 or value<1]`) here
+            // too, matching the Set dispatch — query, set and remove now agree on
+            // every selector shape.
+            var (targets, _) = Core.AttributeFilter.FilterSelector(path, Query, ResolveCellAttributeAlias);
+            if (targets.Count == 0)
+                throw new ArgumentException($"No elements matched selector: {path}");
+
+            var ordered = targets.OrderByDescending(t => ExtractRowIndexForRemoval(t.Path)).ToList();
+            string? lastWarning = null;
+            foreach (var target in ordered)
+            {
+                var w = Remove(target.Path, properties);
+                if (w != null) lastWarning = w;
+            }
+            var summary = $"{ordered.Count} element(s) removed by selector '{path}'";
+            return lastWarning != null ? $"{summary}; {lastWarning}" : summary;
+        }
+
         path = NormalizeExcelPath(path);
         path = ResolveSheetIndexInPath(path);
         var segments = path.TrimStart('/').Split('/', 2);
@@ -68,22 +109,221 @@ public partial class ExcelHandler
             if (sheetCount <= 1)
                 throw new InvalidOperationException($"Cannot remove the last sheet. A workbook must contain at least one sheet.");
 
+            // CONSISTENCY(remove-sheet-chart-refs): a chart on another
+            // sheet may carry <c:f>SheetName!$A$1:$B$2</c:f> references
+            // pointing at the sheet about to disappear. The Open XML
+            // SDK doesn't follow these into a dependency graph, so the
+            // chart silently survives and Excel surfaces a confusing
+            // "external links" warning when the file is reopened
+            // (Excel reads the orphaned `SheetName!` prefix as a
+            // pointer to a separate workbook). Refuse with a clear
+            // message — named ranges referencing the sheet are
+            // already cleaned up below as a passive cleanup, but a
+            // chart series carries layout intent that the user almost
+            // certainly wants to handle explicitly.
+            var sheetIdForCheck = sheet.Id?.Value;
+            var sheetWsPartForCheck = sheetIdForCheck != null
+                ? workbookPart.GetPartById(sheetIdForCheck) as WorksheetPart
+                : null;
+            var refToken = sheetName + "!";
+            var quotedRefToken = "'" + sheetName + "'!";
+            foreach (var otherWsPart in workbookPart.WorksheetParts)
+            {
+                if (sheetWsPartForCheck != null && ReferenceEquals(otherWsPart, sheetWsPartForCheck)) continue;
+                if (otherWsPart.DrawingsPart == null) continue;
+                foreach (var dp in otherWsPart.DrawingsPart.ChartParts)
+                {
+                    var chartXml = dp.ChartSpace?.InnerXml;
+                    if (chartXml == null) continue;
+                    if (chartXml.Contains(refToken, StringComparison.OrdinalIgnoreCase)
+                        || chartXml.Contains(quotedRefToken, StringComparison.OrdinalIgnoreCase))
+                        throw new ArgumentException(
+                            $"Cannot remove sheet '{sheetName}': it is referenced by a chart in this workbook. " +
+                            $"Remove or repoint the chart first.");
+                }
+            }
+
+            // CONSISTENCY(remove-sheet-refs): worksheet XML on other
+            // sheets carries sheet-qualified formula text in three more
+            // shapes that produce the same "external links" warning if
+            // left dangling. Walk typed descendants per worksheet so we
+            // don't false-positive on cell text or comments containing
+            // the literal substring "Sheet1!".
+            //   - sparkline data range  (<xne:f>SheetName!A1:A4</xne:f>)
+            //   - data validation list  (<x:formula1>SheetName!...</x:formula1>)
+            //   - conditional formatting (<x:formula>SheetName!...</x:formula>)
+            // Cell formulas themselves (<x:f>) are intentionally not
+            // guarded — Excel shows #REF! on open, which the existing
+            // R9-1 cache invalidation already accommodates.
+            foreach (var otherWsPart in workbookPart.WorksheetParts)
+            {
+                if (sheetWsPartForCheck != null && ReferenceEquals(otherWsPart, sheetWsPartForCheck)) continue;
+                var wsRoot = otherWsPart.Worksheet;
+                if (wsRoot == null) continue;
+
+                bool MatchesRef(string? text) =>
+                    text != null
+                    && (text.Contains(refToken, StringComparison.OrdinalIgnoreCase)
+                        || text.Contains(quotedRefToken, StringComparison.OrdinalIgnoreCase));
+
+                foreach (var f in wsRoot.Descendants<DocumentFormat.OpenXml.Office.Excel.Formula>())
+                    if (MatchesRef(f.Text))
+                        throw new ArgumentException(
+                            $"Cannot remove sheet '{sheetName}': it is referenced by a sparkline in this workbook. " +
+                            $"Remove or repoint the sparkline first.");
+
+                foreach (var f in wsRoot.Descendants<DocumentFormat.OpenXml.Spreadsheet.Formula1>())
+                    if (MatchesRef(f.Text))
+                        throw new ArgumentException(
+                            $"Cannot remove sheet '{sheetName}': it is referenced by a data validation formula. " +
+                            $"Remove or repoint the validation first.");
+
+                foreach (var f in wsRoot.Descendants<DocumentFormat.OpenXml.Spreadsheet.Formula2>())
+                    if (MatchesRef(f.Text))
+                        throw new ArgumentException(
+                            $"Cannot remove sheet '{sheetName}': it is referenced by a data validation formula. " +
+                            $"Remove or repoint the validation first.");
+
+                foreach (var f in wsRoot.Descendants<DocumentFormat.OpenXml.Spreadsheet.Formula>())
+                    if (MatchesRef(f.Text))
+                        throw new ArgumentException(
+                            $"Cannot remove sheet '{sheetName}': it is referenced by a conditional formatting rule. " +
+                            $"Remove or repoint the rule first.");
+
+                // Internal hyperlinks: <x:hyperlink ref="A1"
+                // location="SheetName!A1"/>. Same "external links"
+                // class — Excel reads the orphan SheetName! as a
+                // pointer to a separate workbook.
+                foreach (var hl in wsRoot.Descendants<DocumentFormat.OpenXml.Spreadsheet.Hyperlink>())
+                    if (MatchesRef(hl.Location?.Value))
+                        throw new ArgumentException(
+                            $"Cannot remove sheet '{sheetName}': it is referenced by a hyperlink in this workbook. " +
+                            $"Remove or repoint the hyperlink first.");
+            }
+
+            // CONSISTENCY(remove-sheet-refs): pivotCacheDefinition parts live
+            // at the workbook level; their <x:cacheSource><x:worksheetSource
+            // sheet="SheetName" .../></x:cacheSource> binds the cache to a
+            // source sheet. Removing that sheet leaves a dangling cache and
+            // Excel surfaces the same "external links" / "found a problem"
+            // dialog as the chart/sparkline/DV/hyperlink cases above.
+            foreach (var cacheDefPart in workbookPart.GetPartsOfType<PivotTableCacheDefinitionPart>())
+            {
+                var wsSource = cacheDefPart.PivotCacheDefinition?.CacheSource?.WorksheetSource;
+                var srcSheet = wsSource?.Sheet?.Value;
+                if (!string.IsNullOrEmpty(srcSheet)
+                    && srcSheet.Equals(sheetName, StringComparison.OrdinalIgnoreCase))
+                    throw new ArgumentException(
+                        $"Cannot remove sheet '{sheetName}': it is referenced as the source of a pivot table in this workbook. " +
+                        $"Remove or repoint the pivot table first.");
+            }
+
+            // R10-2: capture pivot cache definitions referenced by this
+            // sheet's pivot table parts BEFORE deleting the worksheet part,
+            // so we can prune any caches that become orphaned by the
+            // removal. Without this the workbook still carries pivotCaches
+            // entries + cache parts whose owning pivot is gone, which
+            // corrupts the file (Content_Types + workbook.xml.rels keep
+            // references to unreachable parts). Mirrors the cleanup done
+            // by the pivottable[N] branch below — both routes share the
+            // same orphan prune helper.
             var relId = sheet.Id?.Value;
+            var sheetWsPart = relId != null
+                ? workbookPart.GetPartById(relId) as WorksheetPart
+                : null;
+            var cachePartsTouched = sheetWsPart != null
+                ? sheetWsPart.PivotTableParts
+                    .Select(pp => pp.PivotTableCacheDefinitionPart)
+                    .Where(cp => cp != null)
+                    .Cast<PivotTableCacheDefinitionPart>()
+                    .Distinct()
+                    .ToList()
+                : new List<PivotTableCacheDefinitionPart>();
+
+            // Evict the worksheet part from the row cache and dirty set BEFORE
+            // DeletePart destroys it. FlushDirtyParts() calls GetSheet() on
+            // every entry in _dirtyWorksheets; if the part is already destroyed
+            // that call throws InvalidOperationException.
+            if (sheetWsPart != null)
+            {
+                var removedSheetData = GetSheet(sheetWsPart).GetFirstChild<SheetData>();
+                if (removedSheetData != null) InvalidateRowIndex(removedSheetData);
+                _dirtyWorksheets.Remove(sheetWsPart);
+            }
+
             sheet.Remove();
             if (relId != null)
                 workbookPart.DeletePart(workbookPart.GetPartById(relId));
 
-            // Clean up named ranges referencing the deleted sheet
+            // Prune orphan pivot caches now that the sheet (and its pivot
+            // table parts) are gone. PrunePivotCacheIfOrphan walks every
+            // remaining worksheet's pivot tables to confirm the cache is no
+            // longer referenced, then drops the workbook-level pivotCache
+            // entry and the cache part itself (which cascades to records,
+            // _rels, and Content_Types).
+            foreach (var cp in cachePartsTouched)
+                PrunePivotCacheIfOrphan(workbookPart, cp);
+
+            // CONSISTENCY(remove-sheet-refs): defined names that point into the
+            // removed sheet are silently dropped (they would be orphaned).
+            // BUT: if those defined names are referenced by formulas in *other*
+            // sheets, dropping them silently leaves those formulas with #NAME?.
+            // Mirror the DV / sparkline / pivot guards: throw if any other-sheet
+            // formula uses one of the about-to-be-orphaned names.
             var workbook = GetWorkbook();
             var definedNames = workbook.GetFirstChild<DefinedNames>();
             if (definedNames != null)
             {
+                var orphanNames = definedNames.Elements<DefinedName>()
+                    .Where(dn => dn.Text?.Contains(sheetName + "!", StringComparison.OrdinalIgnoreCase) == true)
+                    .Select(dn => dn.Name?.Value)
+                    .Where(n => !string.IsNullOrEmpty(n))
+                    .ToList();
+                if (orphanNames.Count > 0)
+                {
+                    var refs = new List<string>();
+                    foreach (var otherWsPart in workbookPart.WorksheetParts)
+                    {
+                        if (sheetWsPartForCheck != null && ReferenceEquals(otherWsPart, sheetWsPartForCheck)) continue;
+                        var otherSheetName = workbook.Sheets!.Elements<Sheet>()
+                            .FirstOrDefault(s => s.Id?.Value == workbookPart.GetIdOfPart(otherWsPart))?.Name?.Value ?? "?";
+                        if (otherWsPart.Worksheet is null) continue;
+                        foreach (var fcell in otherWsPart.Worksheet.Descendants<DocumentFormat.OpenXml.Spreadsheet.Cell>())
+                        {
+                            var f = fcell.CellFormula?.Text;
+                            if (string.IsNullOrEmpty(f)) continue;
+                            foreach (var n in orphanNames)
+                            {
+                                if (Regex.IsMatch(f, @"\b" + Regex.Escape(n!) + @"\b", RegexOptions.IgnoreCase))
+                                {
+                                    refs.Add($"{otherSheetName}!{fcell.CellReference?.Value ?? "?"} (uses '{n}')");
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (refs.Count > 0)
+                        throw new ArgumentException(
+                            $"Cannot remove sheet '{sheetName}': defined name(s) [{string.Join(", ", orphanNames)}] " +
+                            $"are referenced by formulas in {string.Join(", ", refs)}. " +
+                            $"Remove or repoint the formulas first.");
+                }
+
+                // No external usage — safe to drop the orphan names.
                 var toRemove = definedNames.Elements<DefinedName>()
                     .Where(dn => DefinedNameReferencesSheet(dn.Text, sheetName))
                     .ToList();
                 foreach (var dn in toRemove) dn.Remove();
                 if (!definedNames.HasChildren) definedNames.Remove();
             }
+
+            // R9-1: invalidate stale cachedValue on formulas in other sheets
+            // that referenced the removed sheet. Real Excel would recompute
+            // to #REF! on open; our Get must not report the stale value.
+            // Minimum viable: clear <x:v> so cachedValue drops out. We leave
+            // the formula body alone — rewriting it to #REF! is what Excel
+            // does on recalc and is hard to get right.
+            InvalidateFormulaCacheReferencingSheet(workbookPart, sheetName);
 
             // Fix ActiveTab to prevent workbook corruption when deleting the last tab
             var remainingCount = sheets!.Elements<Sheet>().Count();
@@ -284,6 +524,40 @@ public partial class ExcelHandler
             if (tblIdx < 1 || tblIdx > tableParts.Count)
                 throw new ArgumentException($"Table index {tblIdx} out of range (1..{tableParts.Count})");
             var tablePart = tableParts[tblIdx - 1];
+
+            // CONSISTENCY(remove-refs): mirror sheet-remove DV / sparkline / pivot
+            // guards. Removing a table referenced by structured-ref formulas
+            // (Table1[Col], Table1[#All], or bare Table1) leaves stale formulas
+            // that Excel surfaces as #REF!/#NAME?. Scan every sheet's cell
+            // formulas; throw with the offending cell list.
+            var tableName = tablePart.Table?.Name?.Value;
+            if (!string.IsNullOrEmpty(tableName) && _doc.WorkbookPart != null)
+            {
+                var refs = new List<string>();
+                foreach (var wsp in _doc.WorkbookPart.WorksheetParts)
+                {
+                    if (wsp.Worksheet is null) continue;
+                    var wsName = _doc.WorkbookPart.Workbook?.Sheets?
+                        .Elements<Sheet>()
+                        .FirstOrDefault(s => s.Id?.Value == _doc.WorkbookPart.GetIdOfPart(wsp))?
+                        .Name?.Value ?? "?";
+                    foreach (var fcell in wsp.Worksheet.Descendants<DocumentFormat.OpenXml.Spreadsheet.Cell>())
+                    {
+                        var f = fcell.CellFormula?.Text;
+                        if (string.IsNullOrEmpty(f)) continue;
+                        // Match Table1[ ... ] (structured ref) or bare Table1 as a
+                        // word boundary token. Case-insensitive per Excel norms.
+                        var pattern = @"\b" + Regex.Escape(tableName) + @"(\[|\b)";
+                        if (Regex.IsMatch(f, pattern, RegexOptions.IgnoreCase))
+                            refs.Add($"{wsName}!{fcell.CellReference?.Value ?? "?"}");
+                    }
+                }
+                if (refs.Count > 0)
+                    throw new ArgumentException(
+                        $"Cannot remove table '{tableName}': it is referenced by formulas in {string.Join(", ", refs)}. " +
+                        $"Remove or repoint the formulas first.");
+            }
+
             worksheet.DeletePart(tablePart);
             // Also remove the tablePart reference from the TableParts element
             var tblParts = worksheet.Worksheet?.GetFirstChild<TableParts>();
@@ -374,8 +648,9 @@ public partial class ExcelHandler
             return null;
         }
 
-        // validation[N] — remove data validation
-        var validationRemoveMatch = Regex.Match(cellRef, @"^validation\[(\d+)\]$", RegexOptions.IgnoreCase);
+        // dataValidation[N] (canonical) / validation[N] (legacy alias) —
+        // remove data validation. R7-bt-6 CONSISTENCY(path-segment-naming).
+        var validationRemoveMatch = Regex.Match(cellRef, @"^(?:dataValidation|validation)\[(\d+)\]$", RegexOptions.IgnoreCase);
         if (validationRemoveMatch.Success)
         {
             var dvIdx = int.Parse(validationRemoveMatch.Groups[1].Value);
@@ -404,6 +679,82 @@ public partial class ExcelHandler
             if (cfIdx < 1 || cfIdx > cfElements.Count)
                 throw new ArgumentException($"Conditional formatting index {cfIdx} out of range (1..{cfElements.Count})");
             cfElements[cfIdx - 1].Remove();
+            SaveWorksheet(worksheet);
+            return null;
+        }
+
+        // pivottable[N] — remove pivot table (and its cache if no other pivot references it)
+        var pivotRemoveMatch = Regex.Match(cellRef, @"^pivottable\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (pivotRemoveMatch.Success)
+        {
+            var ptIdx = int.Parse(pivotRemoveMatch.Groups[1].Value);
+            var pivotParts = worksheet.PivotTableParts.ToList();
+            if (ptIdx < 1 || ptIdx > pivotParts.Count)
+                throw new ArgumentException($"PivotTable index {ptIdx} out of range (1..{pivotParts.Count})");
+            var pivotPart = pivotParts[ptIdx - 1];
+
+            // Capture the cache-definition part (if any) so we can clean up
+            // workbook-level PivotCache registration after removing the pivot.
+            var cachePart = pivotPart.PivotTableCacheDefinitionPart;
+
+            // Capture pivot location before deleting the part so we can erase
+            // the rendered cell data from sheetData. Without this, add→remove
+            // cycles leave orphaned rows in sheetData (duplicate row indices,
+            // unbounded XML growth). CONSISTENCY(pivot-remove-cleanup)
+            var pivotLocationRef = pivotPart.PivotTableDefinition
+                ?.GetFirstChild<DocumentFormat.OpenXml.Spreadsheet.Location>()
+                ?.Reference?.Value;
+
+            // Remove the pivot table part itself.
+            worksheet.DeletePart(pivotPart);
+
+            // Erase the pivot's rendered cells from sheetData.
+            if (!string.IsNullOrEmpty(pivotLocationRef))
+            {
+                var pivotSd = GetSheet(worksheet).GetFirstChild<DocumentFormat.OpenXml.Spreadsheet.SheetData>();
+                if (pivotSd != null)
+                    OfficeCli.Core.PivotTableHelper.ClearPivotRangeCells(pivotSd, pivotLocationRef);
+            }
+
+            // If no other pivot table references this cache, drop the cache
+            // definition (and its records) plus the workbook-level PivotCache
+            // registration. Otherwise leave it alone — shared caches are valid.
+            // Shared with the sheet-remove path above via PrunePivotCacheIfOrphan.
+            if (cachePart != null)
+                PrunePivotCacheIfOrphan(_doc.WorkbookPart!, cachePart);
+
+            SaveWorksheet(worksheet);
+            return null;
+        }
+
+        // ole[N] — remove embedded OLE object (cleanup embedded payload +
+        // icon image part). Same part-cleanup discipline as picture/chart
+        // removal to avoid orphaned binaries bloating the package.
+        var oleRemoveMatch = Regex.Match(cellRef, @"^(?:ole|object|embed)\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (oleRemoveMatch.Success)
+        {
+            var oleIdx = int.Parse(oleRemoveMatch.Groups[1].Value);
+            var ws = GetSheet(worksheet);
+            var oleElements = ws.Descendants<OleObject>().ToList();
+            if (oleIdx < 1 || oleIdx > oleElements.Count)
+                throw new ArgumentException($"OLE object index {oleIdx} out of range (1..{oleElements.Count})");
+            var oleToRemove = oleElements[oleIdx - 1];
+            // Delete backing embedded payload + icon image part by rel id.
+            if (oleToRemove.Id?.Value is string oleRelId && !string.IsNullOrEmpty(oleRelId))
+            {
+                try { worksheet.DeletePart(oleRelId); } catch { }
+            }
+            var objectPr = oleToRemove.GetFirstChild<EmbeddedObjectProperties>();
+            if (objectPr?.Id?.Value is string oleIconRelId && !string.IsNullOrEmpty(oleIconRelId))
+            {
+                try { worksheet.DeletePart(oleIconRelId); } catch { }
+            }
+            // Remove the OleObject element itself; if its parent OleObjects
+            // becomes empty, remove that too so the worksheet XML stays clean.
+            var oleParent = oleToRemove.Parent;
+            oleToRemove.Remove();
+            if (oleParent is OleObjects oleColl && !oleColl.HasChildren)
+                oleColl.Remove();
             SaveWorksheet(worksheet);
             return null;
         }
@@ -481,6 +832,169 @@ public partial class ExcelHandler
         return null;
     }
 
+    // Trailing /row[N] index of a path, or 0 when the path is not a row. Used to
+    // order selector-Remove deletions descending so a row shift-delete never
+    // invalidates the indices of not-yet-deleted matches.
+    private static int ExtractRowIndexForRemoval(string? path)
+    {
+        var m = Regex.Match(path ?? "", @"/row\[(\d+)\]$", RegexOptions.IgnoreCase);
+        return m.Success ? int.Parse(m.Groups[1].Value) : 0;
+    }
+
+    /// <summary>
+    /// Remove a single cell at the given path and shift the remaining cells
+    /// in the same row (shift=left) or same column (shift=up) by one position
+    /// to fill the gap. Mirrors Excel UI's "Delete Cells > Shift cells left /
+    /// Shift cells up". For full row/column delete with all metadata
+    /// adjustments use <c>Remove("/Sheet1/row[N]")</c> or
+    /// <c>Remove("/Sheet1/col[X]")</c> instead — those handle merged cells,
+    /// CF/DV/hyperlink/table refs, and formula refs across the entire sheet.
+    ///
+    /// <para>Limitation: only cell references inside the affected row (for
+    /// shift=left) or column (for shift=up) are rewritten. Formula text in
+    /// other rows/columns that references cells in the affected row/col is
+    /// NOT adjusted — Excel will recalculate against the new values on open
+    /// (fullCalcOnLoad), but a formula like A1=<c>=C5</c> after deleting B5
+    /// with shift=left will still read literal C5, not the new B5. Mergeed
+    /// cells and other range-based metadata that span the affected row/col
+    /// are also not adjusted. If precise behavior matters, prefer the
+    /// row/col-level remove.</para>
+    /// </summary>
+    public string? RemoveCellWithShift(string path, string shift)
+    {
+        Modified = true;
+        if (string.IsNullOrEmpty(shift))
+            throw new ArgumentException("--shift requires a value: left or up");
+        var direction = shift.ToLowerInvariant();
+        if (direction is not ("left" or "up"))
+            throw new ArgumentException(
+                $"--shift={shift} not valid for remove. Use 'left' or 'up'.");
+
+        path = NormalizeExcelPath(path);
+        path = ResolveSheetIndexInPath(path);
+        var segments = path.TrimStart('/').Split('/', 2);
+        if (segments.Length < 2)
+            throw new ArgumentException(
+                "--shift requires a cell path like /Sheet1/B5");
+        var sheetName = segments[0];
+        var cellRef = segments[1].ToUpperInvariant();
+        if (!System.Text.RegularExpressions.Regex.IsMatch(cellRef, @"^[A-Z]+\d+$"))
+            throw new ArgumentException(
+                $"--shift requires a single-cell path; got {cellRef}");
+
+        var worksheet = FindWorksheet(sheetName)
+            ?? throw SheetNotFoundException(sheetName);
+        var sheetData = GetSheet(worksheet).GetFirstChild<SheetData>()
+            ?? throw new ArgumentException("Sheet has no data");
+
+        var (col, rowIdx) = ParseCellReference(cellRef);
+        var colIdx = ColumnNameToIndex(col);
+
+        if (direction == "left")
+            ShiftCellsLeftInRow(sheetData, (uint)rowIdx, colIdx);
+        else
+            ShiftCellsUpInColumn(sheetData, col, rowIdx);
+
+        DeleteCalcChainIfPresent();
+        SaveWorksheet(worksheet);
+        return null;
+    }
+
+    /// <summary>
+    /// Remove the cell at (rowIdx, fromColIdx) and shift every cell with
+    /// col &gt; fromColIdx in the same row left by one.
+    /// </summary>
+    private void ShiftCellsLeftInRow(SheetData sheetData, uint rowIdx, int fromColIdx)
+    {
+        var row = sheetData.Elements<Row>().FirstOrDefault(r => r.RowIndex?.Value == rowIdx);
+        if (row == null) return;
+
+        foreach (var cell in row.Elements<Cell>().ToList())
+        {
+            if (cell.CellReference?.Value == null) continue;
+            var (cCol, cRow) = ParseCellReference(cell.CellReference.Value);
+            var cColIdx = ColumnNameToIndex(cCol);
+            if (cColIdx == fromColIdx)
+                cell.Remove();
+            else if (cColIdx > fromColIdx)
+                cell.CellReference = $"{IndexToColumnName(cColIdx - 1)}{cRow}";
+        }
+    }
+
+    /// <summary>
+    /// Shift every cell with col &gt;= fromColIdx in the given row right by
+    /// one, opening a gap at (rowIdx, fromColIdx). Used by add cell with
+    /// --prop shift=right.
+    /// </summary>
+    internal void ShiftCellsRightInRow(SheetData sheetData, uint rowIdx, int fromColIdx)
+    {
+        var row = sheetData.Elements<Row>().FirstOrDefault(r => r.RowIndex?.Value == rowIdx);
+        if (row == null) return;
+
+        // Process in reverse-col order so we don't overwrite a not-yet-shifted ref.
+        var cells = row.Elements<Cell>()
+            .Where(c => c.CellReference?.Value != null)
+            .Select(c => new { Cell = c, ColIdx = ColumnNameToIndex(ParseCellReference(c.CellReference!.Value!).Column) })
+            .Where(t => t.ColIdx >= fromColIdx)
+            .OrderByDescending(t => t.ColIdx)
+            .ToList();
+        foreach (var t in cells)
+        {
+            var pr = ParseCellReference(t.Cell.CellReference!.Value!);
+            t.Cell.CellReference = $"{IndexToColumnName(t.ColIdx + 1)}{pr.Row}";
+        }
+    }
+
+    /// <summary>
+    /// Shift every cell with row &gt;= fromRow in the given column down by
+    /// one, opening a gap at (fromRow, col). Used by add cell with
+    /// --prop shift=down.
+    /// </summary>
+    internal void ShiftCellsDownInColumn(SheetData sheetData, string col, int fromRow)
+    {
+        // Reverse-row order to avoid collisions during rewrite.
+        foreach (var row in sheetData.Elements<Row>().OrderByDescending(r => r.RowIndex?.Value ?? 0))
+        {
+            var rowIdx = (int)(row.RowIndex?.Value ?? 0);
+            if (rowIdx < fromRow) continue;
+
+            var cell = row.Elements<Cell>().FirstOrDefault(c =>
+            {
+                if (c.CellReference?.Value == null) return false;
+                var (cCol, _) = ParseCellReference(c.CellReference.Value);
+                return cCol.Equals(col, StringComparison.OrdinalIgnoreCase);
+            });
+            if (cell != null)
+                cell.CellReference = $"{col}{rowIdx + 1}";
+        }
+    }
+
+    /// <summary>
+    /// Remove the cell at (fromRow, col) and shift every cell with row &gt;
+    /// fromRow in the same column up by one.
+    /// </summary>
+    private void ShiftCellsUpInColumn(SheetData sheetData, string col, int fromRow)
+    {
+        foreach (var row in sheetData.Elements<Row>())
+        {
+            var rowIdx = (int)(row.RowIndex?.Value ?? 0);
+            if (rowIdx < fromRow) continue;
+
+            var cell = row.Elements<Cell>().FirstOrDefault(c =>
+            {
+                if (c.CellReference?.Value == null) return false;
+                var (cCol, _) = ParseCellReference(c.CellReference.Value);
+                return cCol.Equals(col, StringComparison.OrdinalIgnoreCase);
+            });
+            if (cell == null) continue;
+
+            if (rowIdx == fromRow)
+                cell.Remove();
+            else
+                cell.CellReference = $"{col}{rowIdx - 1}";
+        }
+    }
+
     // ==================== Row/Column insert shift ====================
 
     /// <summary>
@@ -491,15 +1005,17 @@ public partial class ExcelHandler
     {
         var ws = GetSheet(worksheet);
         var sheetData = ws.GetFirstChild<SheetData>();
+        var sheetName = GetWorksheets().FirstOrDefault(w => w.Part == worksheet).Name ?? "";
 
+        // 1. SheetData cellRef rewrite (axis-direction-specific reverse iter,
+        //    stays in caller — walker doesn't handle row renumber).
         if (sheetData != null)
         {
-            // Process in reverse order to avoid collision
+            InvalidateRowIndex(sheetData);
             foreach (var row in sheetData.Elements<Row>().OrderByDescending(r => r.RowIndex?.Value ?? 0).ToList())
             {
                 var rowIdx = (int)(row.RowIndex?.Value ?? 0);
                 if (rowIdx < insertRow) continue;
-
                 foreach (var cell in row.Elements<Cell>())
                 {
                     if (cell.CellReference?.Value != null)
@@ -512,49 +1028,13 @@ public partial class ExcelHandler
             }
         }
 
-        // Merge cells
-        var mergeCells = ws.GetFirstChild<MergeCells>();
-        if (mergeCells != null)
-        {
-            foreach (var mc in mergeCells.Elements<MergeCell>().ToList())
-            {
-                var shifted = ShiftRowInRefDown(mc.Reference?.Value, insertRow);
-                if (shifted != null) mc.Reference = shifted;
-            }
-        }
-
-        // Conditional formatting sqref
-        foreach (var cf in ws.Elements<ConditionalFormatting>().ToList())
-        {
-            if (cf.SequenceOfReferences?.HasValue != true) continue;
-            var newRefs = cf.SequenceOfReferences.Items
-                .Select(r => ShiftRowInRefDown(r.Value, insertRow) ?? r.Value).ToList();
-            cf.SequenceOfReferences = new ListValue<StringValue>(newRefs.Select(r => new StringValue(r)));
-        }
-
-        // Data validations sqref
-        var dvs = ws.GetFirstChild<DataValidations>();
-        if (dvs != null)
-        {
-            foreach (var dv in dvs.Elements<DataValidation>().ToList())
-            {
-                if (dv.SequenceOfReferences?.HasValue != true) continue;
-                var newRefs = dv.SequenceOfReferences.Items
-                    .Select(r => ShiftRowInRefDown(r.Value, insertRow) ?? r.Value).ToList();
-                dv.SequenceOfReferences = new ListValue<StringValue>(newRefs.Select(r => new StringValue(r)));
-            }
-        }
-
-        // AutoFilter
-        var af = ws.GetFirstChild<AutoFilter>();
-        if (af?.Reference?.Value != null)
-        {
-            var shifted = ShiftRowInRefDown(af.Reference.Value, insertRow);
-            if (shifted != null) af.Reference = shifted;
-        }
-
-        // Named ranges
-        ShiftNamedRangeRowsDown(worksheet, insertRow);
+        // 2. All sheet-level range-bearing structures + formulas + namedRanges.
+        ApplySheetRangeMutations(
+            worksheet, sheetName,
+            refMapper: r => ShiftRowInRefDown(r, insertRow),
+            formulaTextMapper: f => Core.FormulaRefShifter.Shift(
+                f, sheetName, sheetName, Core.FormulaShiftDirection.RowsDown, insertRow),
+            rowMarkerShift: m => m >= insertRow - 1 ? m + 1 : m);
     }
 
     /// <summary>
@@ -564,7 +1044,10 @@ public partial class ExcelHandler
     {
         var ws = GetSheet(worksheet);
         var sheetData = ws.GetFirstChild<SheetData>();
+        var sheetName = GetWorksheets().FirstOrDefault(w => w.Part == worksheet).Name ?? "";
 
+        // 1. SheetData cellRef rewrite (col-shift, no reverse iter needed
+        //    because we go by colIdx not row order).
         if (sheetData != null)
         {
             foreach (var row in sheetData.Elements<Row>())
@@ -580,7 +1063,7 @@ public partial class ExcelHandler
             }
         }
 
-        // Column width/style definitions
+        // 2. <Columns> width/style (col-only, op-asymmetric — kept out of walker).
         var columns = ws.GetFirstChild<Columns>();
         if (columns != null)
         {
@@ -588,31 +1071,18 @@ public partial class ExcelHandler
             {
                 var min = (int)(col.Min?.Value ?? 0);
                 var max = (int)(col.Max?.Value ?? 0);
-                if (min >= insertColIdx)
-                {
-                    col.Min = (uint)(min + 1);
-                    col.Max = (uint)(max + 1);
-                }
-                else if (max >= insertColIdx)
-                {
-                    col.Max = (uint)(max + 1);
-                }
+                if (min >= insertColIdx) { col.Min = (uint)(min + 1); col.Max = (uint)(max + 1); }
+                else if (max >= insertColIdx) col.Max = (uint)(max + 1);
             }
         }
 
-        // Merge cells
-        var mergeCells = ws.GetFirstChild<MergeCells>();
-        if (mergeCells != null)
-        {
-            foreach (var mc in mergeCells.Elements<MergeCell>().ToList())
-            {
-                var shifted = ShiftColInRefRight(mc.Reference?.Value, insertColIdx);
-                if (shifted != null) mc.Reference = shifted;
-            }
-        }
-
-        // Named ranges
-        ShiftNamedRangeColsRight(worksheet, insertColIdx);
+        // 3. All sheet-level range-bearing structures + formulas + namedRanges.
+        ApplySheetRangeMutations(
+            worksheet, sheetName,
+            refMapper: r => ShiftColInRefRight(r, insertColIdx),
+            formulaTextMapper: f => Core.FormulaRefShifter.Shift(
+                f, sheetName, sheetName, Core.FormulaShiftDirection.ColumnsRight, insertColIdx),
+            colMarkerShift: m => m >= insertColIdx - 1 ? m + 1 : m);
     }
 
     private static string? ShiftRowInRefDown(string? refStr, int insertRow)
@@ -632,6 +1102,10 @@ public partial class ExcelHandler
         return string.Join(":", shifted);
     }
 
+    // RewriteFormulaRefsInSheet was removed — its responsibility (rewriting
+    // CellFormula.Text and the shared/array formula `ref` attribute) is now
+    // section 7 of ApplySheetRangeMutations in ExcelHandler.SheetShift.cs.
+
     private static string? ShiftColInRefRight(string? refStr, int insertColIdx)
     {
         if (string.IsNullOrEmpty(refStr)) return null;
@@ -650,52 +1124,10 @@ public partial class ExcelHandler
         return string.Join(":", shifted);
     }
 
-    private void ShiftNamedRangeRowsDown(WorksheetPart worksheet, int insertRow)
-    {
-        var sheetName = GetWorksheets().FirstOrDefault(w => w.Part == worksheet).Name;
-        if (string.IsNullOrEmpty(sheetName)) return;
-        var definedNames = GetWorkbook().GetFirstChild<DefinedNames>();
-        if (definedNames == null) return;
-        foreach (var dn in definedNames.Elements<DefinedName>())
-        {
-            if (dn.Text == null) continue;
-            dn.Text = Regex.Replace(dn.Text,
-                $@"(?<={Regex.Escape(sheetName)}!\$?[A-Z]+\$?)(\d+)",
-                m =>
-                {
-                    var row = int.Parse(m.Value);
-                    return row >= insertRow ? (row + 1).ToString() : m.Value;
-                },
-                RegexOptions.IgnoreCase);
-        }
-        GetWorkbook().Save();
-    }
-
-    private void ShiftNamedRangeColsRight(WorksheetPart worksheet, int insertColIdx)
-    {
-        var sheetName = GetWorksheets().FirstOrDefault(w => w.Part == worksheet).Name;
-        if (string.IsNullOrEmpty(sheetName)) return;
-        var definedNames = GetWorkbook().GetFirstChild<DefinedNames>();
-        if (definedNames == null) return;
-        foreach (var dn in definedNames.Elements<DefinedName>())
-        {
-            if (dn.Text == null) continue;
-            dn.Text = Regex.Replace(dn.Text,
-                $@"(?<={Regex.Escape(sheetName)}!)\$?([A-Z]+)\$?(\d+)",
-                m =>
-                {
-                    var col = m.Groups[1].Value.ToUpperInvariant();
-                    var row = m.Groups[2].Value;
-                    var colIdx = ColumnNameToIndex(col);
-                    if (colIdx < insertColIdx) return m.Value;
-                    var dollar1 = m.Value.StartsWith("$") ? "$" : "";
-                    var dollar2 = m.Value.Contains("$" + col + "$") ? "$" : "";
-                    return $"{dollar1}{IndexToColumnName(colIdx + 1)}{dollar2}{row}";
-                },
-                RegexOptions.IgnoreCase);
-        }
-        GetWorkbook().Save();
-    }
+    // ShiftNamedRangeRowsDown / ShiftNamedRangeColsRight removed — defined
+    // names are now rewritten by section 8 of ApplySheetRangeMutations using
+    // the proper FormulaRefShifter (which handles quoted sheet names, string
+    // literals, and structured refs correctly, unlike the old regex helpers).
 
     // ==================== Row shift ====================
 
@@ -703,15 +1135,16 @@ public partial class ExcelHandler
     {
         var ws = GetSheet(worksheet);
         var sheetData = ws.GetFirstChild<SheetData>();
+        var sheetName = GetWorksheets().FirstOrDefault(w => w.Part == worksheet).Name ?? "";
 
-        // 1. Shift all rows after the deleted row: update RowIndex + all CellReferences
+        // 1. SheetData cellRef rewrite (delete direction).
         if (sheetData != null)
         {
+            InvalidateRowIndex(sheetData);
             foreach (var row in sheetData.Elements<Row>().ToList())
             {
                 var rowIdx = (int)(row.RowIndex?.Value ?? 0);
                 if (rowIdx <= deletedRow) continue;
-
                 foreach (var cell in row.Elements<Cell>())
                 {
                     if (cell.CellReference?.Value != null)
@@ -724,57 +1157,13 @@ public partial class ExcelHandler
             }
         }
 
-        // 2. Merge cells
-        var mergeCells = ws.GetFirstChild<MergeCells>();
-        if (mergeCells != null)
-        {
-            foreach (var mc in mergeCells.Elements<MergeCell>().ToList())
-            {
-                var shifted = ShiftRowInRef(mc.Reference?.Value, deletedRow);
-                if (shifted == null) mc.Remove();
-                else mc.Reference = shifted;
-            }
-            if (!mergeCells.HasChildren) mergeCells.Remove();
-        }
-
-        // 3. Conditional formatting sqref
-        foreach (var cf in ws.Elements<ConditionalFormatting>().ToList())
-        {
-            if (cf.SequenceOfReferences?.HasValue != true) continue;
-            var newRefs = cf.SequenceOfReferences.Items
-                .Select(r => ShiftRowInRef(r.Value, deletedRow))
-                .OfType<string>().ToList();
-            if (newRefs.Count == 0) cf.Remove();
-            else cf.SequenceOfReferences = new ListValue<StringValue>(newRefs.Select(r => new StringValue(r)));
-        }
-
-        // 4. Data validations sqref
-        var dvs = ws.GetFirstChild<DataValidations>();
-        if (dvs != null)
-        {
-            foreach (var dv in dvs.Elements<DataValidation>().ToList())
-            {
-                if (dv.SequenceOfReferences?.HasValue != true) continue;
-                var newRefs = dv.SequenceOfReferences.Items
-                    .Select(r => ShiftRowInRef(r.Value, deletedRow))
-                    .OfType<string>().ToList();
-                if (newRefs.Count == 0) dv.Remove();
-                else dv.SequenceOfReferences = new ListValue<StringValue>(newRefs.Select(r => new StringValue(r)));
-            }
-            if (!dvs.HasChildren) dvs.Remove();
-        }
-
-        // 5. AutoFilter
-        var af = ws.GetFirstChild<AutoFilter>();
-        if (af?.Reference?.Value != null)
-        {
-            var shifted = ShiftRowInRef(af.Reference.Value, deletedRow);
-            if (shifted != null) af.Reference = shifted;
-            else af.Remove();
-        }
-
-        // 6. Named ranges (workbook-level)
-        ShiftNamedRangeRows(worksheet, deletedRow);
+        // 2. All sheet-level range-bearing structures + formulas + namedRanges.
+        ApplySheetRangeMutations(
+            worksheet, sheetName,
+            refMapper: r => ShiftRowInRef(r, deletedRow),
+            formulaTextMapper: f => Core.FormulaRefShifter.Shift(
+                f, sheetName, sheetName, Core.FormulaShiftDirection.RowsUp, deletedRow),
+            rowMarkerShift: m => m > deletedRow - 1 ? m - 1 : m);
     }
 
     // ==================== Column shift ====================
@@ -784,8 +1173,9 @@ public partial class ExcelHandler
         var ws = GetSheet(worksheet);
         var deletedColIdx = ColumnNameToIndex(deletedColName);
         var sheetData = ws.GetFirstChild<SheetData>();
+        var sheetName = GetWorksheets().FirstOrDefault(w => w.Part == worksheet).Name ?? "";
 
-        // 1. Remove cells in deleted column, shift remaining cell references left
+        // 1. SheetData cellRef rewrite: remove cells in deleted col, shift others left.
         if (sheetData != null)
         {
             foreach (var row in sheetData.Elements<Row>())
@@ -795,16 +1185,14 @@ public partial class ExcelHandler
                     if (cell.CellReference?.Value == null) continue;
                     var (col, rowIdx) = ParseCellReference(cell.CellReference.Value);
                     var colIdx = ColumnNameToIndex(col);
-
-                    if (colIdx == deletedColIdx)
-                        cell.Remove();
+                    if (colIdx == deletedColIdx) cell.Remove();
                     else if (colIdx > deletedColIdx)
                         cell.CellReference = $"{IndexToColumnName(colIdx - 1)}{rowIdx}";
                 }
             }
         }
 
-        // 2. Column width/style definitions
+        // 2. <Columns> width/style (col-only, op-asymmetric — kept out of walker).
         var columns = ws.GetFirstChild<Columns>();
         if (columns != null)
         {
@@ -812,165 +1200,102 @@ public partial class ExcelHandler
             {
                 var min = (int)(col.Min?.Value ?? 0);
                 var max = (int)(col.Max?.Value ?? 0);
-
-                if (min == deletedColIdx && max == deletedColIdx)
-                {
-                    col.Remove();
-                }
-                else if (min > deletedColIdx)
-                {
-                    col.Min = (uint)(min - 1);
-                    col.Max = (uint)(max - 1);
-                }
-                else if (max >= deletedColIdx)
-                {
-                    col.Max = (uint)(max - 1);
-                }
+                if (min == deletedColIdx && max == deletedColIdx) col.Remove();
+                else if (min > deletedColIdx) { col.Min = (uint)(min - 1); col.Max = (uint)(max - 1); }
+                else if (max >= deletedColIdx) col.Max = (uint)(max - 1);
             }
             if (!columns.HasChildren) columns.Remove();
         }
 
-        // 3. Merge cells
-        var mergeCells = ws.GetFirstChild<MergeCells>();
-        if (mergeCells != null)
-        {
-            foreach (var mc in mergeCells.Elements<MergeCell>().ToList())
-            {
-                var shifted = ShiftColInRef(mc.Reference?.Value, deletedColIdx);
-                if (shifted == null) mc.Remove();
-                else mc.Reference = shifted;
-            }
-            if (!mergeCells.HasChildren) mergeCells.Remove();
-        }
-
-        // 4. Conditional formatting sqref
-        foreach (var cf in ws.Elements<ConditionalFormatting>().ToList())
-        {
-            if (cf.SequenceOfReferences?.HasValue != true) continue;
-            var newRefs = cf.SequenceOfReferences.Items
-                .Select(r => ShiftColInRef(r.Value, deletedColIdx))
-                .OfType<string>().ToList();
-            if (newRefs.Count == 0) cf.Remove();
-            else cf.SequenceOfReferences = new ListValue<StringValue>(newRefs.Select(r => new StringValue(r)));
-        }
-
-        // 5. Data validations sqref
-        var dvs = ws.GetFirstChild<DataValidations>();
-        if (dvs != null)
-        {
-            foreach (var dv in dvs.Elements<DataValidation>().ToList())
-            {
-                if (dv.SequenceOfReferences?.HasValue != true) continue;
-                var newRefs = dv.SequenceOfReferences.Items
-                    .Select(r => ShiftColInRef(r.Value, deletedColIdx))
-                    .OfType<string>().ToList();
-                if (newRefs.Count == 0) dv.Remove();
-                else dv.SequenceOfReferences = new ListValue<StringValue>(newRefs.Select(r => new StringValue(r)));
-            }
-            if (!dvs.HasChildren) dvs.Remove();
-        }
-
-        // 6. AutoFilter
-        var af = ws.GetFirstChild<AutoFilter>();
-        if (af?.Reference?.Value != null)
-        {
-            var shifted = ShiftColInRef(af.Reference.Value, deletedColIdx);
-            if (shifted != null) af.Reference = shifted;
-            else af.Remove();
-        }
-
-        // 7. Named ranges
-        ShiftNamedRangeCols(worksheet, deletedColIdx);
+        // 3. All sheet-level range-bearing structures + formulas + namedRanges.
+        ApplySheetRangeMutations(
+            worksheet, sheetName,
+            refMapper: r => ShiftColInRef(r, deletedColIdx),
+            formulaTextMapper: f => Core.FormulaRefShifter.Shift(
+                f, sheetName, sheetName, Core.FormulaShiftDirection.ColumnsLeft, deletedColIdx),
+            colMarkerShift: m => m > deletedColIdx - 1 ? m - 1 : m);
     }
 
     // ==================== Shift helpers ====================
 
     /// <summary>
     /// Shift row numbers in a cell/range reference after a row deletion.
-    /// Returns null if the reference sits exactly on the deleted row (should be removed).
-    /// For ranges: if either endpoint is on the deleted row the range is removed;
-    /// endpoints after the deleted row are decremented by 1.
+    /// Single cell: returns null when it sits on the deleted row. Range: shrinks
+    /// — an endpoint on the deleted row collapses inward (start clamps to the
+    /// deleted row, end drops by one); endpoints after the deleted row decrement
+    /// by one. The range is dropped only when it collapses entirely (its whole
+    /// span was the deleted row), mirroring how Excel keeps A1:A4 as A1:A3 after
+    /// deleting row 1 instead of discarding the structure.
     /// </summary>
     private static string? ShiftRowInRef(string? refStr, int deletedRow)
     {
         if (string.IsNullOrEmpty(refStr)) return null;
         var parts = refStr.Split(':');
-        var shifted = new List<string>(parts.Length);
-        foreach (var part in parts)
+
+        if (parts.Length == 1)
         {
             try
             {
-                var (col, row) = ParseCellReference(part);
+                var (col, row) = ParseCellReference(parts[0]);
                 if (row == deletedRow) return null;
-                shifted.Add(row > deletedRow ? $"{col}{row - 1}" : part);
+                return row > deletedRow ? $"{col}{row - 1}" : parts[0];
             }
-            catch { shifted.Add(part); }
+            catch { return refStr; }
         }
-        return string.Join(":", shifted);
+
+        try
+        {
+            var (startCol, startRow) = ParseCellReference(parts[0]);
+            var (endCol, endRow) = ParseCellReference(parts[1]);
+            // start clamps: only moves when strictly below the deleted row.
+            int newStart = startRow > deletedRow ? startRow - 1 : startRow;
+            // end clamps: moves when at or below the deleted row (loses that row).
+            int newEnd = endRow >= deletedRow ? endRow - 1 : endRow;
+            if (newStart > newEnd) return null; // whole span was the deleted row
+            return $"{startCol}{newStart}:{endCol}{newEnd}";
+        }
+        catch { return refStr; }
     }
 
     /// <summary>
     /// Shift column letters in a cell/range reference after a column deletion.
-    /// Returns null if the reference sits exactly on the deleted column.
+    /// Single cell: returns null when it sits on the deleted column. Range:
+    /// shrinks the same way <see cref="ShiftRowInRef"/> does for rows; dropped
+    /// only when the whole span was the deleted column.
     /// </summary>
     private static string? ShiftColInRef(string? refStr, int deletedColIdx)
     {
         if (string.IsNullOrEmpty(refStr)) return null;
         var parts = refStr.Split(':');
-        var shifted = new List<string>(parts.Length);
-        foreach (var part in parts)
+
+        if (parts.Length == 1)
         {
             try
             {
-                var (col, row) = ParseCellReference(part);
+                var (col, row) = ParseCellReference(parts[0]);
                 var colIdx = ColumnNameToIndex(col);
                 if (colIdx == deletedColIdx) return null;
-                shifted.Add(colIdx > deletedColIdx ? $"{IndexToColumnName(colIdx - 1)}{row}" : part);
+                return colIdx > deletedColIdx ? $"{IndexToColumnName(colIdx - 1)}{row}" : parts[0];
             }
-            catch { shifted.Add(part); }
+            catch { return refStr; }
         }
-        return string.Join(":", shifted);
-    }
 
-    /// <summary>
-    /// Update workbook-level named ranges after a row deletion.
-    /// Handles both relative (A1) and absolute ($A$1) references.
-    /// Row numbers in named range formula text are shifted via regex replacement.
-    /// </summary>
-    private void ShiftNamedRangeRows(WorksheetPart worksheet, int deletedRow)
-    {
-        var sheetName = GetWorksheets().FirstOrDefault(w => w.Part == worksheet).Name;
-        if (string.IsNullOrEmpty(sheetName)) return;
-
-        var definedNames = GetWorkbook().GetFirstChild<DefinedNames>();
-        if (definedNames == null) return;
-
-        foreach (var dn in definedNames.Elements<DefinedName>())
+        try
         {
-            if (dn.Text == null) continue;
-            dn.Text = ShiftRowNumbersInText(dn.Text, sheetName, deletedRow);
+            var (startCol, startRow) = ParseCellReference(parts[0]);
+            var (endCol, endRow) = ParseCellReference(parts[1]);
+            int startIdx = ColumnNameToIndex(startCol);
+            int endIdx = ColumnNameToIndex(endCol);
+            int newStart = startIdx > deletedColIdx ? startIdx - 1 : startIdx;
+            int newEnd = endIdx >= deletedColIdx ? endIdx - 1 : endIdx;
+            if (newStart > newEnd) return null; // whole span was the deleted column
+            return $"{IndexToColumnName(newStart)}{startRow}:{IndexToColumnName(newEnd)}{endRow}";
         }
-        GetWorkbook().Save();
+        catch { return refStr; }
     }
 
-    /// <summary>
-    /// Update workbook-level named ranges after a column deletion.
-    /// </summary>
-    private void ShiftNamedRangeCols(WorksheetPart worksheet, int deletedColIdx)
-    {
-        var sheetName = GetWorksheets().FirstOrDefault(w => w.Part == worksheet).Name;
-        if (string.IsNullOrEmpty(sheetName)) return;
-
-        var definedNames = GetWorkbook().GetFirstChild<DefinedNames>();
-        if (definedNames == null) return;
-
-        foreach (var dn in definedNames.Elements<DefinedName>())
-        {
-            if (dn.Text == null) continue;
-            dn.Text = ShiftColLettersInText(dn.Text, sheetName, deletedColIdx);
-        }
-        GetWorkbook().Save();
-    }
+    // ShiftNamedRangeRows / ShiftNamedRangeCols removed — see comment above
+    // about ShiftNamedRangeRowsDown/ColsRight; same consolidation.
 
     private static bool DefinedNameReferencesSheet(string? formulaText, string sheetName)
     {
@@ -1099,40 +1424,98 @@ public partial class ExcelHandler
     }
 
     /// <summary>
-    /// In a formula/reference string like "Sheet1!$A$3:$B$5", decrement row numbers > deletedRow.
-    /// Only touches references that belong to the given sheet.
+    // ShiftRowNumbersInText / ShiftColLettersInText removed — defined-name
+    // text is now rewritten by section 8 of ApplySheetRangeMutations using
+    // FormulaRefShifter, which correctly handles quoted sheet names, string
+    // literals, and structured refs that the regex shifters mishandled.
+
+    /// <summary>
+    /// R9-1: after a sheet is removed, walk every remaining worksheet's
+    /// formula cells and clear the CellValue on any formula that still
+    /// references the removed sheet by name (bare or single-quote wrapped).
+    /// We do not rewrite the formula body — that is Excel's job on recalc.
+    /// Clearing the cached value keeps officecli's Get consistent with the
+    /// state Real Excel presents when it opens the file.
     /// </summary>
-    private static string ShiftRowNumbersInText(string text, string sheetName, int deletedRow)
+    private void InvalidateFormulaCacheReferencingSheet(WorkbookPart workbookPart, string removedSheetName)
     {
-        // Match: optional sheet prefix (Sheet1! or 'Sheet 1'!), optional $, column letters, optional $, row number
-        return Regex.Replace(text,
-            $@"(?<={Regex.Escape(sheetName)}!\$?[A-Z]+\$?)(\d+)",
-            m =>
+        // Two literal match forms Excel uses for sheet-qualified refs:
+        //   Sheet2!A1             (bare, no special chars)
+        //   'My Data'!A1          (quoted when name has spaces/specials)
+        // Internal single quotes in sheet names are escaped as '' inside
+        // the quoted form, but creating such names is rare and the
+        // Contains check below still handles the unescaped prefix.
+        var bareToken = removedSheetName + "!";
+        var quotedToken = "'" + removedSheetName.Replace("'", "''") + "'!";
+
+        foreach (var wsPart in workbookPart.WorksheetParts)
+        {
+            var sheetData = GetSheet(wsPart).GetFirstChild<SheetData>();
+            if (sheetData == null) continue;
+
+            bool touched = false;
+            foreach (var row in sheetData.Elements<Row>())
             {
-                var row = int.Parse(m.Value);
-                return row > deletedRow ? (row - 1).ToString() : m.Value;
-            },
-            RegexOptions.IgnoreCase);
+                foreach (var cell in row.Elements<Cell>())
+                {
+                    var formula = cell.CellFormula?.Text;
+                    if (string.IsNullOrEmpty(formula)) continue;
+                    if (formula.IndexOf(bareToken, StringComparison.OrdinalIgnoreCase) < 0 &&
+                        formula.IndexOf(quotedToken, StringComparison.OrdinalIgnoreCase) < 0)
+                        continue;
+
+                    // Clear the cached value. CellValue element removed so
+                    // Get reports null/missing cachedValue, matching Excel's
+                    // initial state on open (before recalc fills in #REF!).
+                    cell.CellValue?.Remove();
+                    touched = true;
+                }
+            }
+
+            if (touched)
+            {
+                GetSheet(wsPart).Save();
+            }
+        }
     }
 
     /// <summary>
-    /// In a formula/reference string like "Sheet1!$B$1:$D$5", shift column letters > deletedColIdx left by one.
-    /// Only touches references that belong to the given sheet.
+    /// R10-2 / R2-1 shared helper. Drops a PivotTableCacheDefinitionPart and
+    /// its workbook-level &lt;pivotCache&gt; entry IF no remaining pivot
+    /// table part references it. Used by both the sheet-remove and the
+    /// pivottable[N]-remove code paths so the orphan-cleanup logic stays
+    /// in one place.
     /// </summary>
-    private static string ShiftColLettersInText(string text, string sheetName, int deletedColIdx)
+    private static void PrunePivotCacheIfOrphan(WorkbookPart workbookPart, PivotTableCacheDefinitionPart cachePart)
     {
-        return Regex.Replace(text,
-            $@"(?<={Regex.Escape(sheetName)}!)\$?([A-Z]+)\$?(\d+)",
-            m =>
+        bool stillReferenced = workbookPart.WorksheetParts
+            .SelectMany(ws => ws.PivotTableParts)
+            .Any(pp => pp.PivotTableCacheDefinitionPart == cachePart);
+        if (stillReferenced) return;
+
+        // Locate and remove the <pivotCache> entry in workbook.xml by
+        // matching the relationship id from WorkbookPart → cachePart.
+        string? cacheRelId = null;
+        try { cacheRelId = workbookPart.GetIdOfPart(cachePart); } catch { }
+
+        var wb = workbookPart.Workbook;
+        if (wb != null)
+        {
+            var pivotCaches = wb.GetFirstChild<PivotCaches>();
+            if (pivotCaches != null && cacheRelId != null)
             {
-                var col = m.Groups[1].Value.ToUpperInvariant();
-                var row = m.Groups[2].Value;
-                var colIdx = ColumnNameToIndex(col);
-                if (colIdx <= deletedColIdx) return m.Value;
-                var dollar1 = m.Value.StartsWith("$") ? "$" : "";
-                var dollar2 = m.Value.Contains("$" + col + "$") ? "$" : "";
-                return $"{dollar1}{IndexToColumnName(colIdx - 1)}{dollar2}{row}";
-            },
-            RegexOptions.IgnoreCase);
+                var pcEntry = pivotCaches.Elements<PivotCache>()
+                    .FirstOrDefault(pc => pc.Id?.Value == cacheRelId);
+                pcEntry?.Remove();
+                if (!pivotCaches.HasChildren)
+                    pivotCaches.Remove();
+            }
+            try { workbookPart.DeletePart(cachePart); } catch { }
+            wb.Save();
+        }
+        else
+        {
+            try { workbookPart.DeletePart(cachePart); } catch { }
+        }
     }
 }

@@ -1,9 +1,27 @@
-// Copyright 2025 OfficeCli (officecli.ai)
+// Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
 
 // Ensure UTF-8 output on all platforms (Windows defaults to system codepage e.g. GBK)
 Console.OutputEncoding = System.Text.Encoding.UTF8;
+
+// Snapshot the OS user culture BEFORE we pin the thread to Invariant.
+// Read by `create --locale` (when no explicit tag is given) to bake the
+// user's actual locale into the new doc, mirroring what Word / Pages /
+// other producers do on the host machine. Stashed once at startup so
+// subsequent reads of CultureInfo.CurrentCulture (which we deliberately
+// force to Invariant below) don't lose the original signal.
+OfficeCli.Core.LocaleFontRegistry.OsLocaleSnapshot = System.Globalization.CultureInfo.CurrentCulture.Name;
+
+// officecli is a CLI / AI tool that produces machine-format output (OOXML,
+// JSON, CSS, canonical DocumentNode.Format values) and accepts the same on
+// input. All three formats fix '.' as the decimal separator. Pin the
+// process-wide culture to invariant so every interpolated double, ToString,
+// and TryParse uses '.' regardless of the user's regional settings —
+// otherwise nl-NL / de-DE / fr-FR users see '141,73pt' in CSS, '0,5' in
+// `get --json` output, and silently-zero numCache reads in charts.
+System.Globalization.CultureInfo.DefaultThreadCurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
+System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = System.Globalization.CultureInfo.InvariantCulture;
 
 // Internal commands (spawned as separate processes, not user-facing)
 if (args.Length == 1 && args[0] == "__update-check__")
@@ -12,35 +30,67 @@ if (args.Length == 1 && args[0] == "__update-check__")
     return 0;
 }
 
+// Unify `--help` with `help` so AI agents see one help surface, not two.
+//   officecli [--help|-h|-?]              → officecli help
+//   officecli <cmd> [--help|-h|-?] [...]  → officecli help <cmd>
+// The `help` command renders schema details for docx/xlsx/pptx, EarlyDispatchHelp
+// for mcp/skills/install, and forwards to the SCL `<cmd> --help` for everything
+// else — making `help` the single source of truth, with `--help` as a compatibility
+// alias. Done before any other dispatch so it overrides early-dispatch + SCL.
+//
+// Restricted to args[0] and args[1] only — a blanket scan over all args would
+// also rewrite cases where `--help` appears as an option *value* (e.g.
+// `officecli set foo.docx /body --prop --help`), silently corrupting the
+// command into a help dump.
+if (args.Length > 0)
+{
+    if (args[0] is "--help" or "-h" or "-?")
+    {
+        // `officecli --help docx [add chart]` → `officecli help docx [add chart]`.
+        // Preserve trailing tokens so flag-style invocations can drill into
+        // schema details, not just the root banner.
+        var tail = args.Skip(1).ToArray();
+        args = tail.Length == 0
+            ? new[] { "help" }
+            : new[] { "help" }.Concat(tail).ToArray();
+    }
+    else if (args.Length >= 2 && args[1] is "--help" or "-h" or "-?")
+    {
+        // `officecli set --help chart` → `officecli help set chart`.
+        // Mirror the args[0] branch above: preserve tokens after the help
+        // flag so '<cmd> --help <element>' drills into the element schema
+        // (verb-filtered) instead of just listing the verb's elements.
+        var tail = args.Skip(2).ToArray();
+        args = tail.Length == 0
+            ? new[] { "help", args[0] }
+            : new[] { "help", args[0] }.Concat(tail).ToArray();
+    }
+}
+
 // MCP commands: officecli mcp [target]
 if (args.Length >= 1 && args[0] == "mcp")
 {
     if (args.Length == 1)
     {
         // officecli mcp → start MCP server
-        await OfficeCli.Core.McpServer.RunAsync();
+        await OfficeCli.McpServer.RunAsync();
         return 0;
     }
     if (args.Length == 2 && args[1] == "list")
     {
-        OfficeCli.Core.McpInstaller.Install("list");
+        OfficeCli.McpInstaller.Install("list");
         return 0;
     }
     if (args.Length == 3 && args[1] == "uninstall")
     {
-        OfficeCli.Core.McpInstaller.Uninstall(args[2]);
-        return 0;
+        return OfficeCli.McpInstaller.Uninstall(args[2]) ? 0 : 1;
     }
     if (args.Length == 2)
     {
         // officecli mcp <target> → register + show instructions
-        OfficeCli.Core.McpInstaller.Install(args[1]);
-        return 0;
+        return OfficeCli.McpInstaller.Install(args[1]) ? 0 : 1;
     }
-    Console.Error.WriteLine("Usage: officecli mcp              Start MCP server");
-    Console.Error.WriteLine("       officecli mcp <target>     Register (lms, claude, cursor, vscode)");
-    Console.Error.WriteLine("       officecli mcp uninstall <target>  Unregister");
-    Console.Error.WriteLine("       officecli mcp list         Show registration status");
+    OfficeCli.CommandBuilder.WriteEarlyDispatchUsage("mcp", Console.Error);
     return 1;
 }
 
@@ -59,12 +109,13 @@ if (args.Length >= 1 && args[0] == "setup")
 // Legacy alias
 if (args.Length == 1 && args[0] == "mcp-serve")
 {
-    await OfficeCli.Core.McpServer.RunAsync();
+    await OfficeCli.McpServer.RunAsync();
     return 0;
 }
 
-// Skills commands: officecli skills install [skill-name]
-if (args.Length >= 1 && args[0] == "skills")
+// Skill[s] commands. `skill` and `skills` are interchangeable to forgive
+// the singular/plural typo; routing is by the second token, not the first.
+if (args.Length >= 1 && (args[0] == "skills" || args[0] == "skill"))
 {
     if (args.Length == 2 && args[1] == "list")
     {
@@ -84,18 +135,47 @@ if (args.Length >= 1 && args[0] == "skills")
         var result = OfficeCli.Core.SkillInstaller.InstallSkill(args[2]);
         return result.Count > 0 ? 0 : 1;
     }
+    if (args.Length == 4 && args[1] == "install")
+    {
+        // officecli skills install <skill> <agent>  OR  <agent> <skill>
+        // Token order is auto-detected — skill names and agent aliases don't overlap.
+        var result = OfficeCli.Core.SkillInstaller.InstallSkillToAgentTarget(args[2], args[3]);
+        return result.Count > 0 ? 0 : 1;
+    }
     if (args.Length == 2)
     {
-        // Legacy: officecli skills claude → base SKILL.md to specific agent
-        OfficeCli.Core.SkillInstaller.Install(args[1]);
-        return 0;
+        // 2-arg form: install base SKILL.md to a specific agent
+        // (officecli skills <agent-alias>). The previous "if it's a known skill
+        // name → ensure-install + print" branch was removed in favor of the
+        // dedicated `officecli load_skill <name>` command, so CLI matches MCP:
+        // load = pure read, install = explicit `skills install <name>`.
+        var result = OfficeCli.Core.SkillInstaller.Install(args[1]);
+        return result.Count > 0 ? 0 : 1;
     }
-    Console.Error.WriteLine("Usage:");
-    Console.Error.WriteLine("  officecli skills install                Install base SKILL.md to all detected agents");
-    Console.Error.WriteLine("  officecli skills install <skill-name>   Install a specific skill to all detected agents");
-    Console.Error.WriteLine("  officecli skills <agent>                Install base SKILL.md to a specific agent");
-    Console.Error.WriteLine($"Skills: {string.Join(", ", new[] { "pptx", "word", "excel", "morph-ppt", "pitch-deck", "academic-paper", "data-dashboard", "financial-model" })}");
-    Console.Error.WriteLine("Agents: claude, copilot, codex, cursor, windsurf, minimax, openclaw, nanobot, zeroclaw, all");
+    OfficeCli.CommandBuilder.WriteEarlyDispatchUsage("skills", Console.Error);
+    return 1;
+}
+
+// load_skill: read-only counterpart of `skills install <name>`. Prints the
+// embedded SKILL.md content for a named skill to stdout with no install
+// side-effect. Mirrors the MCP `load_skill` tool exactly so CLI and MCP have
+// the same semantics.
+if (args.Length >= 1 && args[0] == "load_skill")
+{
+    if (args.Length == 2)
+    {
+        try
+        {
+            Console.Out.Write(OfficeCli.Core.SkillInstaller.LoadSkillContent(args[1]));
+            return 0;
+        }
+        catch (ArgumentException ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return 1;
+        }
+    }
+    OfficeCli.CommandBuilder.WriteEarlyDispatchUsage("load_skill", Console.Error);
     return 1;
 }
 
@@ -103,12 +183,15 @@ if (args.Length >= 1 && args[0] == "skills")
 if (args.Length >= 2 && args[0] == "config")
 {
     OfficeCli.Core.CliLogger.LogCommand(args);
-    OfficeCli.Core.UpdateChecker.HandleConfigCommand(args.Skip(1).ToArray());
-    return 0;
+    return OfficeCli.Core.UpdateChecker.HandleConfigCommand(args.Skip(1).ToArray());
 }
 
 // Log command
 OfficeCli.Core.CliLogger.LogCommand(args);
+
+// Auto-install: if running outside ~/.local/bin/officecli, copy self there.
+// Fresh install → full Run() (binary + skills + MCP). Upgrade → binary only.
+OfficeCli.Core.Installer.MaybeAutoInstall(args);
 
 // Non-blocking update check: spawns background upgrade if stale
 if (Environment.GetEnvironmentVariable("OFFICECLI_SKIP_UPDATE") != "1")
@@ -118,33 +201,8 @@ var rootCommand = OfficeCli.CommandBuilder.BuildRootCommand();
 
 if (args.Length == 0)
 {
-    rootCommand.Parse("--help").Invoke();
+    rootCommand.Parse("help").Invoke();
     return 0;
-}
-
-// Handle help commands (docx/xlsx/pptx) before System.CommandLine parsing
-// so that --help also shows our custom output instead of the default help
-if (OfficeCli.HelpCommands.TryHandle(args))
-    return 0;
-
-// Rewrite format-prefixed commands: "xlsx add cell <file> <path> ..." → "add <file> <path> --type cell ..."
-// This allows users to type "officecli xlsx add cell file.xlsx /Sheet1 --prop ..."
-// instead of "officecli add file.xlsx /Sheet1 --type cell --prop ..."
-if (args.Length >= 4 && args[0].ToLowerInvariant() is "docx" or "xlsx" or "pptx"
-    && args[1].ToLowerInvariant() is "add" or "set" or "get" or "query" or "remove" or "view" or "raw")
-{
-    var verb = args[1];
-    var elementType = args[2];
-    var rest = args.Skip(3).ToList();
-    // Only rewrite if the next arg looks like a file path (not a flag)
-    if (rest.Count > 0 && !rest[0].StartsWith("--"))
-    {
-        var newArgs = new List<string> { verb };
-        newArgs.AddRange(rest);
-        if (verb.Equals("add", StringComparison.OrdinalIgnoreCase))
-            newArgs.InsertRange(2, ["--type", elementType]);
-        args = newArgs.ToArray();
-    }
 }
 
 var parseResult = rootCommand.Parse(args);
