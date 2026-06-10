@@ -97,13 +97,7 @@ if (args.Length >= 1 && args[0] == "mcp")
 // Install command: officecli install [target]
 if (args.Length >= 1 && args[0] == "install")
 {
-    return OfficeCli.Core.Installer.RunInstall(args.Skip(1).ToArray());
-}
-
-// Setup command: officecli setup [target]
-if (args.Length >= 1 && args[0] == "setup")
-{
-    return OfficeCli.Core.Installer.RunSetup(args.Skip(1).ToArray());
+    return OfficeCli.Core.Installer.Run(args.Skip(1).ToArray());
 }
 
 // Legacy alias

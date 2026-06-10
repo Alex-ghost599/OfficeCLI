@@ -26,32 +26,29 @@ internal static class WatchNotifier
     /// </summary>
     public static void NotifyIfWatching(string filePath, WatchMessage message)
     {
-        foreach (var pipeName in WatchServer.GetWatchPipeCandidates(filePath))
+        try
         {
-            try
+            RunWithTimeout(() =>
             {
-                RunWithTimeout(() =>
-                {
-                    using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
-                    client.Connect(100); // fast fail if no watch
+                var pipeName = WatchServer.GetWatchPipeName(filePath);
+                using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
+                client.Connect(100); // fast fail if no watch
 
-                    var json = JsonSerializer.Serialize(message, WatchMessageJsonContext.Default.WatchMessage);
+                var json = JsonSerializer.Serialize(message, WatchMessageJsonContext.Default.WatchMessage);
 
-                    // Write first, then read. Creating StreamReader before writing
-                    // causes a deadlock: StreamReader's constructor probes for BOM by
-                    // reading from the pipe, but the server is waiting for our write.
-                    using var writer = new StreamWriter(client, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
-                    writer.WriteLine(json);
+                // Write first, then read. Creating StreamReader before writing
+                // causes a deadlock: StreamReader's constructor probes for BOM by
+                // reading from the pipe, but the server is waiting for our write.
+                using var writer = new StreamWriter(client, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
+                writer.WriteLine(json);
 
-                    using var reader = new StreamReader(client, new UTF8Encoding(false), detectEncodingFromByteOrderMarks: false, leaveOpen: true);
-                    reader.ReadLine(); // wait for ack
-                }, PipeTimeout);
-                return;
-            }
-            catch
-            {
-                // try next candidate
-            }
+                using var reader = new StreamReader(client, new UTF8Encoding(false), detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+                reader.ReadLine(); // wait for ack
+            }, PipeTimeout);
+        }
+        catch
+        {
+            // No watch process running, or timed out — silently ignore
         }
     }
 
@@ -108,35 +105,32 @@ internal static class WatchNotifier
     /// </summary>
     public static string[]? QuerySelection(string filePath)
     {
-        foreach (var pipeName in WatchServer.GetWatchPipeCandidates(filePath))
+        try
         {
-            try
+            string[]? result = null;
+            RunWithTimeout(() =>
             {
-                string[]? result = null;
-                RunWithTimeout(() =>
-                {
-                    using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
-                    client.Connect(200);
+                var pipeName = WatchServer.GetWatchPipeName(filePath);
+                using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
+                client.Connect(200);
 
-                    var noBom = new UTF8Encoding(false);
-                    using var writer = new StreamWriter(client, noBom, leaveOpen: true) { AutoFlush = true };
-                    writer.WriteLine("get-selection");
-                    writer.Flush();
+                var noBom = new UTF8Encoding(false);
+                using var writer = new StreamWriter(client, noBom, leaveOpen: true) { AutoFlush = true };
+                writer.WriteLine("get-selection");
+                writer.Flush();
 
-                    using var reader = new StreamReader(client, noBom, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
-                    var json = reader.ReadLine();
-                    if (json == null) { result = Array.Empty<string>(); return; }
-                    result = JsonSerializer.Deserialize(json, WatchSelectionJsonContext.Default.StringArray)
-                             ?? Array.Empty<string>();
-                }, PipeTimeout);
-                return result;
-            }
-            catch
-            {
-                // try next candidate
-            }
+                using var reader = new StreamReader(client, noBom, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+                var json = reader.ReadLine();
+                if (json == null) { result = Array.Empty<string>(); return; }
+                result = JsonSerializer.Deserialize(json, WatchSelectionJsonContext.Default.StringArray)
+                         ?? Array.Empty<string>();
+            }, PipeTimeout);
+            return result;
         }
-        return null; // no watch running, or timed out
+        catch
+        {
+            return null; // no watch running, or timed out
+        }
     }
 
     // ==================== Marks ====================
@@ -156,44 +150,37 @@ internal static class WatchNotifier
         // surfaces the real error instead of silently treating empty id as success.
         string? result = null;
         string? error = null;
-        foreach (var pipeName in WatchServer.GetWatchPipeCandidates(filePath))
+        try
         {
-            try
+            RunWithTimeout(() =>
             {
-                RunWithTimeout(() =>
-                {
-                    using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
-                    client.Connect(200);
+                var pipeName = WatchServer.GetWatchPipeName(filePath);
+                using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
+                client.Connect(200);
 
-                    var noBom = new UTF8Encoding(false);
-                    using var writer = new StreamWriter(client, noBom, leaveOpen: true) { AutoFlush = true };
-                    var payload = JsonSerializer.Serialize(request, WatchMarkJsonContext.Default.MarkRequest);
-                    writer.WriteLine("mark " + payload);
-                    writer.Flush();
+                var noBom = new UTF8Encoding(false);
+                using var writer = new StreamWriter(client, noBom, leaveOpen: true) { AutoFlush = true };
+                var payload = JsonSerializer.Serialize(request, WatchMarkJsonContext.Default.MarkRequest);
+                writer.WriteLine("mark " + payload);
+                writer.Flush();
 
-                    using var reader = new StreamReader(client, noBom, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
-                    var responseLine = reader.ReadLine();
-                    if (string.IsNullOrEmpty(responseLine)) { result = null; return; }
-                    var resp = JsonSerializer.Deserialize(responseLine, WatchMarkJsonContext.Default.MarkResponse);
-                    // BUG-FUZZER-R3-M01: use IsNullOrWhiteSpace for symmetry with the
-                    // server-side path/color validation. A whitespace-only error string
-                    // would otherwise spuriously throw MarkRejectedException.
-                    if (!string.IsNullOrWhiteSpace(resp?.Error)) { error = resp!.Error; return; }
-                    result = string.IsNullOrEmpty(resp?.Id) ? null : resp.Id;
-                }, PipeTimeout);
-                if (error != null) throw new MarkRejectedException(error);
-                return result;
-            }
-            catch (MarkRejectedException)
-            {
-                throw;
-            }
-            catch
-            {
-                // try next candidate
-            }
+                using var reader = new StreamReader(client, noBom, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+                var responseLine = reader.ReadLine();
+                if (string.IsNullOrEmpty(responseLine)) { result = null; return; }
+                var resp = JsonSerializer.Deserialize(responseLine, WatchMarkJsonContext.Default.MarkResponse);
+                // BUG-FUZZER-R3-M01: use IsNullOrWhiteSpace for symmetry with the
+                // server-side path/color validation. A whitespace-only error string
+                // would otherwise spuriously throw MarkRejectedException.
+                if (!string.IsNullOrWhiteSpace(resp?.Error)) { error = resp!.Error; return; }
+                result = string.IsNullOrEmpty(resp?.Id) ? null : resp.Id;
+            }, PipeTimeout);
         }
-        return null; // no watch running, or pipe failure
+        catch
+        {
+            return null; // no watch running, or pipe failure
+        }
+        if (error != null) throw new MarkRejectedException(error);
+        return result;
     }
 
     /// <summary>
@@ -202,36 +189,33 @@ internal static class WatchNotifier
     /// </summary>
     public static int? RemoveMarks(string filePath, UnmarkRequest request)
     {
-        foreach (var pipeName in WatchServer.GetWatchPipeCandidates(filePath))
+        try
         {
-            try
+            int? result = null;
+            RunWithTimeout(() =>
             {
-                int? result = null;
-                RunWithTimeout(() =>
-                {
-                    using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
-                    client.Connect(200);
+                var pipeName = WatchServer.GetWatchPipeName(filePath);
+                using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
+                client.Connect(200);
 
-                    var noBom = new UTF8Encoding(false);
-                    using var writer = new StreamWriter(client, noBom, leaveOpen: true) { AutoFlush = true };
-                    var payload = JsonSerializer.Serialize(request, WatchMarkJsonContext.Default.UnmarkRequest);
-                    writer.WriteLine("unmark " + payload);
-                    writer.Flush();
+                var noBom = new UTF8Encoding(false);
+                using var writer = new StreamWriter(client, noBom, leaveOpen: true) { AutoFlush = true };
+                var payload = JsonSerializer.Serialize(request, WatchMarkJsonContext.Default.UnmarkRequest);
+                writer.WriteLine("unmark " + payload);
+                writer.Flush();
 
-                    using var reader = new StreamReader(client, noBom, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
-                    var responseLine = reader.ReadLine();
-                    if (string.IsNullOrEmpty(responseLine)) { result = 0; return; }
-                    var resp = JsonSerializer.Deserialize(responseLine, WatchMarkJsonContext.Default.UnmarkResponse);
-                    result = resp?.Removed ?? 0;
-                }, PipeTimeout);
-                return result;
-            }
-            catch
-            {
-                // try next candidate
-            }
+                using var reader = new StreamReader(client, noBom, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+                var responseLine = reader.ReadLine();
+                if (string.IsNullOrEmpty(responseLine)) { result = 0; return; }
+                var resp = JsonSerializer.Deserialize(responseLine, WatchMarkJsonContext.Default.UnmarkResponse);
+                result = resp?.Removed ?? 0;
+            }, PipeTimeout);
+            return result;
         }
-        return null; // no watch running
+        catch
+        {
+            return null; // no watch running
+        }
     }
 
     /// <summary>
@@ -256,35 +240,32 @@ internal static class WatchNotifier
     /// </summary>
     public static MarksResponse? QueryMarksFull(string filePath)
     {
-        foreach (var pipeName in WatchServer.GetWatchPipeCandidates(filePath))
+        try
         {
-            try
+            MarksResponse? result = null;
+            RunWithTimeout(() =>
             {
-                MarksResponse? result = null;
-                RunWithTimeout(() =>
-                {
-                    using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
-                    client.Connect(200);
+                var pipeName = WatchServer.GetWatchPipeName(filePath);
+                using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
+                client.Connect(200);
 
-                    var noBom = new UTF8Encoding(false);
-                    using var writer = new StreamWriter(client, noBom, leaveOpen: true) { AutoFlush = true };
-                    writer.WriteLine("get-marks");
-                    writer.Flush();
+                var noBom = new UTF8Encoding(false);
+                using var writer = new StreamWriter(client, noBom, leaveOpen: true) { AutoFlush = true };
+                writer.WriteLine("get-marks");
+                writer.Flush();
 
-                    using var reader = new StreamReader(client, noBom, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
-                    var json = reader.ReadLine();
-                    if (json == null) { result = new MarksResponse(); return; }
-                    result = JsonSerializer.Deserialize(json, WatchMarkJsonContext.Default.MarksResponse)
-                             ?? new MarksResponse();
-                }, PipeTimeout);
-                return result;
-            }
-            catch
-            {
-                // try next candidate
-            }
+                using var reader = new StreamReader(client, noBom, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+                var json = reader.ReadLine();
+                if (json == null) { result = new MarksResponse(); return; }
+                result = JsonSerializer.Deserialize(json, WatchMarkJsonContext.Default.MarksResponse)
+                         ?? new MarksResponse();
+            }, PipeTimeout);
+            return result;
         }
-        return null; // no watch running
+        catch
+        {
+            return null; // no watch running
+        }
     }
 
     /// <summary>
@@ -293,34 +274,31 @@ internal static class WatchNotifier
     /// </summary>
     public static bool SendClose(string filePath)
     {
-        foreach (var pipeName in WatchServer.GetWatchPipeCandidates(filePath))
+        try
         {
-            try
+            bool result = false;
+            RunWithTimeout(() =>
             {
-                bool result = false;
-                RunWithTimeout(() =>
-                {
-                    using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
-                    client.Connect(200);
+                var pipeName = WatchServer.GetWatchPipeName(filePath);
+                using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
+                client.Connect(200);
 
-                    // Write first, then read — same ordering as NotifyIfWatching
-                    // to avoid BOM-detection deadlock on the pipe.
-                    using var writer = new StreamWriter(client, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
-                    writer.WriteLine("close");
-                    writer.Flush();
+                // Write first, then read — same ordering as NotifyIfWatching
+                // to avoid BOM-detection deadlock on the pipe.
+                using var writer = new StreamWriter(client, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
+                writer.WriteLine("close");
+                writer.Flush();
 
-                    using var reader = new StreamReader(client, new UTF8Encoding(false), detectEncodingFromByteOrderMarks: false, leaveOpen: true);
-                    reader.ReadLine();
-                    result = true;
-                }, PipeTimeout);
-                return result;
-            }
-            catch
-            {
-                // try next candidate
-            }
+                using var reader = new StreamReader(client, new UTF8Encoding(false), detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+                reader.ReadLine();
+                result = true;
+            }, PipeTimeout);
+            return result;
         }
-        return false;
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>
